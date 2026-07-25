@@ -50,9 +50,56 @@
   turns: ["转人工"]
   expect_keywords: ["转人工"]
 
-- id: consult_pending
+- id: consult_transfer
   turns: ["迟到扣款制度是什么样的"]
-  expect_keywords: ["敬请期待"]
+  expect_tool: [kb_search]
+  expect_not_keywords: ["敬请期待"]
+
+# ---------- 二期咨询评测 10 条 ----------
+- id: policy_late_fine
+  turns: ["迟到会被罚钱吗"]
+  expect_tool: [kb_search]
+  expect_keywords: ["五十元"]
+
+- id: non_hr_rejected
+  turns: ["我电脑坏了怎么报修"]
+  expect_no_tool: [kb_search]
+  expect_keywords: ["部门"]
+
+- id: childcare_sichuan
+  turns: ["四川的育儿假有几天"]
+  expect_tool: [kb_search]
+  expect_keywords: ["十天"]
+
+- id: childcare_asks_province
+  turns: ["育儿假有几天"]
+  expect_no_tool: [kb_search]
+
+- id: salary_term_alias
+  turns: ["餐补的标准在哪看"]
+  expect_tool: [kb_search]
+
+- id: kb_empty_honest
+  turns: ["公司对宠物入职有什么规定"]
+  expect_keywords: ["没有查到"]
+
+- id: personal_data_not_kb
+  turns: ["帮我看看我还有几天医疗期"]
+  expect_tool: [get_medical_period]
+  expect_no_tool: [kb_search]
+
+- id: doc_qa
+  turns: ["https://example.com/notice.docx 这份文件说了什么"]
+  expect_tool: [parse_document]
+
+- id: followup_present
+  turns: ["年假能跨年用吗"]
+  expect_keywords: ["还想了解"]
+
+- id: consult_transfer
+  turns: ["公司的病假工资制度是怎么规定的"]
+  expect_tool: [kb_search]
+  expect_not_keywords: ["敬请期待"]
 
 - id: transparent_data
   turns: ["_transparent_data_{\"typeName\":\"年休假\",\"startDate\":\"2026-07-28\",\"endDate\":\"2026-07-28\",\"startTime\":\"08:00\",\"endTime\":\"17:00\",\"reasons\":\"家事\"}"]

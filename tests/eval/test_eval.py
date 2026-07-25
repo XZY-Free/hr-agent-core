@@ -101,6 +101,25 @@ def stub_gaia(monkeypatch):
     monkeypatch.setattr(gaia_client_module.GaiaClient, "request", _stub_request)
 
 
+class _FakeResp:
+    status_code = 200
+    headers = {"Content-Length": "100"}
+
+    def iter_content(self, chunk_size=8192):
+        yield b"# test\nhello world"
+
+    def raise_for_status(self):
+        pass
+
+
+@pytest.fixture
+def stub_requests(monkeypatch):
+    """挂桩文档下载，避免评测时真实请求外部 URL。"""
+    import hr_agent.tools.rules.parse_document as pd_mod
+
+    monkeypatch.setattr(pd_mod.requests, "get", lambda *args, **kwargs: _FakeResp())
+
+
 BIZ_STATE = {
     "employeeId": "E001",
     "corp_id": "corp1",
@@ -132,8 +151,8 @@ def _collect_event_data(events):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", CASES, ids=[c["id"] for c in CASES])
-async def test_eval_case(case, stub_gaia):
-    """逐 case 跑多轮对话，断言 expect_tool / expect_no_tool / expect_keywords / expect_marker。"""
+async def test_eval_case(case, stub_gaia, stub_requests):
+    """逐 case 跑多轮对话，断言 expect_tool / expect_no_tool / expect_keywords / expect_not_keywords / expect_marker。"""
     # 延迟 import Runner：避免无 Key 时模块加载就触发 root_agent 实例化失败
     from veadk import Runner
 
@@ -157,7 +176,7 @@ async def test_eval_case(case, stub_gaia):
         if ft:
             final_text = ft
 
-    # ---------- 断言三类期望 ----------
+    # ---------- 断言期望 ----------
     if "expect_tool" in case:
         for t in case["expect_tool"]:
             assert t in tool_calls, (
@@ -172,6 +191,11 @@ async def test_eval_case(case, stub_gaia):
         for kw in case["expect_keywords"]:
             assert kw in final_text, (
                 f"{case['id']}: 期望回复含 '{kw}'，实际回复 {final_text!r}"
+            )
+    if "expect_not_keywords" in case:
+        for kw in case["expect_not_keywords"]:
+            assert kw not in final_text, (
+                f"{case['id']}: 期望回复不含 '{kw}'，实际回复 {final_text!r}"
             )
     if "expect_marker" in case:
         assert case["expect_marker"] in final_text, (
