@@ -1,0 +1,26 @@
+"""知识库检索工具：按 scope 查询并返回结构化结果。"""
+
+from hr_agent.schemas.tool_result import ok, err
+from hr_agent.knowledge.backend import get_backend
+
+_VALID_SCOPES = {"policy", "handbook", "salary", "childcare", "all"}
+
+
+def kb_search(query: str, scope: str, tool_context) -> dict:
+    """检索知识库。
+
+    Args:
+        query: 查询文本
+        scope: 检索范围（policy / handbook / salary / childcare / all）
+        tool_context: ADK 工具上下文
+    """
+    if scope not in _VALID_SCOPES:
+        return err("invalid_scope", f"无效的 scope：{scope}，可选值为 {_VALID_SCOPES}")
+
+    try:
+        backend = get_backend()
+        results = backend.search(query, scope=scope, top_k=5)
+    except Exception:
+        return err("kb_unavailable", "知识库暂不可用，请稍后再试或转人工")
+
+    return ok(results)
