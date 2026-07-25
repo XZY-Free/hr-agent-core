@@ -1,0 +1,59 @@
+# tests/eval/cases.yaml —— 对话评测首批 12 条
+# 字段说明：
+#   turns: 多轮对话的用户消息列表（按顺序发送）
+#   expect_tool: 断言这些工具被调用过
+#   expect_no_tool: 断言这些工具【未被调用】
+#   expect_keywords: 最终回复必含的关键词列表（全部命中才算通过）
+#   expect_marker: 最终回复必含的 JUMP 标记（如 [[JUMP:punch-details]]）
+#
+# 挂桩策略：monkeypatch hr_agent.tools.gaia.client.GaiaClient.request，
+# 按 path 分派固定响应（员工 sex=F、排班 7-27 OFF、年假余额 remain=4 等）。
+
+- id: quick_tomorrow
+  turns: ["明天请一天年休假"]
+  expect_tool: [get_schedule, submit_leave]
+  expect_keywords: ["年休假"]
+
+- id: missing_type_asks
+  turns: ["我明天想请假"]
+  expect_no_tool: [submit_leave]        # 缺类型必须追问而不是直接提交
+
+- id: multi_type_rejected
+  turns: ["我要请年假和事假"]
+  expect_keywords: ["分开"]
+
+- id: gender_mismatch
+  turns: ["帮我请陪产假，下周一开始三天"]   # 挂桩员工 sex=F
+  expect_keywords: ["无法", "陪产假"]
+
+- id: rest_day
+  turns: ["7月27号请一天事假"]            # 挂桩排班 27 日 OFF
+  expect_keywords: ["休息"]
+
+- id: balance_query
+  turns: ["我还有几天年假？"]
+  expect_tool: [get_leave_balance]
+
+- id: annual_calc
+  turns: ["我的年假是怎么折算的？"]
+  expect_tool: [calc_annual_leave]
+
+- id: page_jump_punch
+  turns: ["打开打卡明细"]
+  expect_marker: "[[JUMP:punch-details]]"
+
+- id: cancel_leave
+  turns: ["我要取消昨天提交的请假"]
+  expect_keywords: ["我的表单"]
+
+- id: handoff
+  turns: ["转人工"]
+  expect_keywords: ["转人工"]
+
+- id: consult_pending
+  turns: ["迟到扣款制度是什么样的"]
+  expect_keywords: ["敬请期待"]
+
+- id: transparent_data
+  turns: ["_transparent_data_{\"typeName\":\"年休假\",\"startDate\":\"2026-07-28\",\"endDate\":\"2026-07-28\",\"startTime\":\"08:00\",\"endTime\":\"17:00\",\"reasons\":\"家事\"}"]
+  expect_keywords: ["年休假", "确认"]
