@@ -31,4 +31,8 @@ def get_backend() -> KnowledgeBackend:
         from hr_agent.knowledge.local_stub import LocalStubBackend
 
         return LocalStubBackend()
+    if backend_type == "agentkit":
+        from hr_agent.knowledge.agentkit_backend import AgentKitKnowledgeBackend
+
+        return AgentKitKnowledgeBackend()
     raise ValueError(f"未知的 KB_BACKEND: {backend_type}")
