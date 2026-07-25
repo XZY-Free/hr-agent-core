@@ -12,6 +12,7 @@ dependencies = [
     "litellm",
     "requests>=2.31",
     "pydantic>=2.7",
+    "markitdown[pdf,docx,xlsx]>=0.1",
 ]
 
 [dependency-groups]
