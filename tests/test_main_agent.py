@@ -4,6 +4,7 @@
 """
 from hr_agent.agents.main_agent import root_agent
 from hr_agent.agents.leave_agent import leave_agent
+from hr_agent.agents.consult_agent import consult_agent
 from hr_agent.callbacks.jump_marker import jump_marker_callback
 
 
@@ -17,11 +18,13 @@ def test_root_agent_basic():
     assert root_agent.instruction and "人力" in root_agent.instruction
 
 
-def test_root_agent_has_leave_sub_agent():
+def test_root_agent_has_two_sub_agents():
     sub_names = {getattr(a, "name", "") for a in root_agent.sub_agents}
     assert "leave_agent" in sub_names
+    assert "consult_agent" in sub_names
     # 同一对象实例（不是副本）
     assert any(a is leave_agent for a in root_agent.sub_agents)
+    assert any(a is consult_agent for a in root_agent.sub_agents)
 
 
 def test_root_agent_tools_include_query_and_jump():
@@ -47,4 +50,6 @@ def test_main_prompt_phrases_injected():
     # 话术关键短语已被注入
     assert "我的表单" in instruction  # 来自 PHRASES["cancel_leave"]
     assert "转人工" in instruction
-    assert "敬请期待" in instruction
+    # 二期上线后不再引用"敬请期待"
+    assert "敬请期待" not in instruction
+    assert "consult_agent" in instruction
