@@ -5,6 +5,7 @@
 - after_model_callback 挂 jump_marker_callback：把 pending_jump 注入为 `[[JUMP:<code>]]`
 """
 import os
+from datetime import date
 
 from veadk import Agent
 
@@ -20,8 +21,12 @@ from hr_agent.tools.rules.page_jump import page_jump
 
 MODEL_NAME = os.getenv("MODEL_AGENT_NAME", "doubao-seed-1.6-250615")
 
-# 用 PHRASES 注入固定话术占位符 {cancel_leave}/{handoff}
-INSTRUCTION = MAIN_AGENT_PROMPT.format(**PHRASES)
+# 今天日期注入 prompt：进程启动时确定，供模型换算口语日期（今天/明天/昨天…）。
+# 生产进程一天内通常不重启，日期稳定；重启后自动更新为当天。
+TODAY = date.today().isoformat()
+
+# 用 PHRASES 注入固定话术占位符 {cancel_leave}/{handoff}，并注入今天日期 {today}
+INSTRUCTION = MAIN_AGENT_PROMPT.format(today=TODAY, **PHRASES)
 
 root_agent = Agent(
     name="root_agent",

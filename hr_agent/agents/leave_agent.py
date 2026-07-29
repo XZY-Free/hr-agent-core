@@ -1,5 +1,6 @@
 """请假 Agent：受理请假申请、补齐信息、校验并提交请假单。"""
 import os
+from datetime import date
 
 from veadk import Agent
 
@@ -10,10 +11,13 @@ from hr_agent.tools.gaia.submit import submit_leave
 
 MODEL_NAME = os.getenv("MODEL_AGENT_NAME", "doubao-seed-1.6-250615")
 
+# 今天日期注入 prompt，供模型换算口语日期（与 main_agent 同源）
+TODAY = date.today().isoformat()
+
 leave_agent = Agent(
     name="leave_agent",
     model_name=MODEL_NAME,
     description="请假办理专员：受理请假申请、补齐信息、校验并提交请假单",
-    instruction=LEAVE_AGENT_PROMPT,
+    instruction=LEAVE_AGENT_PROMPT.format(today=TODAY),
     tools=[get_leave_permissions, get_leave_balance, get_schedule, submit_leave],
 )
