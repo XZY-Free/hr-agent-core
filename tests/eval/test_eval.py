@@ -52,6 +52,8 @@ STUB_BALANCE = {
     "details": {"employeeData": [{"employeeDetailData": [
         {"effectiveYear": "2026", "leaveCode": "A31", "leaveName": "年休假",
          "leaveUsed": 1, "leaveTotal": 5, "leaveRemain": 4},
+        {"effectiveYear": "2026", "leaveCode": "A08", "leaveName": "陪产假",
+         "leaveUsed": 0, "leaveTotal": 15, "leaveRemain": 15},
     ]}]},
 }
 
@@ -91,7 +93,14 @@ def _stub_request(self, env, method, path, *, json_body=None, params=None,
     if "person/search-effective" in path:
         return STUB_EMPLOYEE
     if "getScheduleData" in path:
-        return STUB_SCHEDULE
+        # 按请求的日期范围过滤，模拟真实盖亚 API 行为（真实 API 只返回区间内排班）。
+        # 不过滤会导致 get_schedule(07-30,07-30) 拿回整段 07-27..07-31，
+        # submit_leave 取首条 07-27(休息) 误判为休息日。
+        sd = (json_body or {}).get("startDate", "")
+        ed = (json_body or {}).get("endDate", sd)
+        all_rows = STUB_SCHEDULE["details"]["employeeData"][0]["employeeDetailData"]
+        rows = [r for r in all_rows if sd <= r["shiftDate"] <= ed] or all_rows
+        return {"details": {"employeeData": [{"employeeDetailData": rows}]}}
     return {"result": True, "data": []}
 
 
@@ -133,7 +142,12 @@ def _user_content(text: str) -> types.Content:
 
 
 def _collect_event_data(events):
-    """从事件流收集工具调用名与最终文本。"""
+    """从事件流收集工具调用名与最终文本。
+
+    doubao-seed-1.6 是推理模型，会输出大量 thinking part（part.thought=True）。
+    若不过滤，最终文本会混入完整推理链（"让我想想...首先..."），污染关键词断言。
+    对齐 veADK Runner.run() 的处理：跳过 thought part，只收真实输出。
+    """
     tool_calls = []
     final_texts = []
     for ev in events:
@@ -144,7 +158,7 @@ def _collect_event_data(events):
             if fc is not None and getattr(fc, "name", None):
                 tool_calls.append(fc.name)
             txt = getattr(p, "text", None)
-            if txt is not None and txt.strip():
+            if txt is not None and txt.strip() and not getattr(p, "thought", False):
                 final_texts.append(txt)
     return tool_calls, "\n".join(final_texts)
 
@@ -159,6 +173,13 @@ async def test_eval_case(case, stub_gaia, stub_requests):
     runner = Runner(agent=root_agent, app_name="hr-agent-eval",
                     user_id="eval-user")
     session_id = f"eval-{case['id']}"
+
+    # run_async 是 ADK 原生方法，不自动建 session（自动建 session 的逻辑只在
+    # veADK 包装的 run() 里）。须先显式创建 session，否则抛 SessionNotFoundError。
+    # 写法对齐 veadk Runner.run() 内部的 create_session 调用。
+    await runner.short_term_memory.create_session(
+        app_name="hr-agent-eval", user_id="eval-user", session_id=session_id
+    )
 
     tool_calls: list[str] = []
     final_text = ""
@@ -182,6 +203,11 @@ async def test_eval_case(case, stub_gaia, stub_requests):
             assert t in tool_calls, (
                 f"{case['id']}: 期望调用工具 {t}，实际调用 {tool_calls}"
             )
+    if "expect_any_tool" in case:
+        # 命中其一即可（如"还有几天年假"可走 get_leave_balance 或更完整的组合工具 calc_annual_leave）
+        assert any(t in tool_calls for t in case["expect_any_tool"]), (
+            f"{case['id']}: 期望调用工具之一 {case['expect_any_tool']}，实际调用 {tool_calls}"
+        )
     if "expect_no_tool" in case:
         for t in case["expect_no_tool"]:
             assert t not in tool_calls, (
@@ -192,6 +218,11 @@ async def test_eval_case(case, stub_gaia, stub_requests):
             assert kw in final_text, (
                 f"{case['id']}: 期望回复含 '{kw}'，实际回复 {final_text!r}"
             )
+    if "expect_any_keyword" in case:
+        # 命中其一即可，容纳模型同义表达波动（如"分开提交"≈"先选其中一种"）
+        assert any(kw in final_text for kw in case["expect_any_keyword"]), (
+            f"{case['id']}: 期望回复含其一 {case['expect_any_keyword']}，实际回复 {final_text!r}"
+        )
     if "expect_not_keywords" in case:
         for kw in case["expect_not_keywords"]:
             assert kw not in final_text, (
