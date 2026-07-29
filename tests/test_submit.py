@@ -1,7 +1,6 @@
 from types import SimpleNamespace
 
-import pytest
-
+from hr_agent.tools.gaia import client as gaia_client_module
 from hr_agent.tools.gaia.submit import submit_leave
 
 STATE = {"employeeId": "E001", "corp_id": "corp1",
@@ -130,8 +129,55 @@ def test_cross_day_end_date_plus_one(monkeypatch):
     assert r["data"]["form"]["endTime"] == "07:00"
 
 
-def test_dry_run_disabled_calls_real_submit_not_implemented(monkeypatch):
+def test_dry_run_disabled_calls_real_submit(monkeypatch):
+    """GAIA_DRY_RUN=false 走直连提交示例实现（正式链路默认不走这里）。"""
     _mock_all(monkeypatch, remain=5.0)
     monkeypatch.setenv("GAIA_DRY_RUN", "false")
-    with pytest.raises(NotImplementedError):
-        submit_leave(**_common_args(), tool_context=_ctx())
+    captured = {}
+
+    def _fake_request(self, env, method, path, *, json_body=None, params=None,
+                      extra_headers=None, tenant=None):
+        captured.update(env=env, method=method, path=path, body=json_body,
+                        tenant=tenant)
+        return {"result": True, "code": 200, "data": {"applyId": "AP123"}}
+
+    monkeypatch.setattr(gaia_client_module.GaiaClient, "request", _fake_request)
+    r = submit_leave(**_common_args(), tool_context=_ctx())
+
+    assert r["success"]
+    assert r["data"]["submitted"] is True
+    assert r["data"]["dry_run"] is False
+    assert r["data"]["apply_id"] == "AP123"
+    # 提交体 = 请假单字段 + employeeId；corp_id 进路径与 tenant 头
+    assert captured["method"] == "POST"
+    assert captured["tenant"] == "corp1"
+    assert "corp1" in captured["path"]
+    assert captured["body"]["employeeId"] == "E001"
+    assert captured["body"]["typeCode"] == "A31"
+    assert captured["body"]["leaveDays"] == 1.0
+
+
+def test_real_submit_interface_returns_failure(monkeypatch):
+    """接口返回 result=false 时转成 submit_failed，并带上接口 message。"""
+    _mock_all(monkeypatch, remain=5.0)
+    monkeypatch.setenv("GAIA_DRY_RUN", "false")
+    monkeypatch.setattr(
+        gaia_client_module.GaiaClient, "request",
+        lambda *a, **k: {"result": False, "code": 500, "message": "该日期已有请假单"})
+    r = submit_leave(**_common_args(), tool_context=_ctx())
+    assert not r["success"] and r["error_type"] == "submit_failed"
+    assert "该日期已有请假单" in r["message"]
+
+
+def test_real_submit_network_error(monkeypatch):
+    """网络异常兜底为 gaia_error，不把异常抛给模型。"""
+    _mock_all(monkeypatch, remain=5.0)
+    monkeypatch.setenv("GAIA_DRY_RUN", "false")
+
+    def _boom(*a, **k):
+        raise ConnectionError("connection refused")
+
+    monkeypatch.setattr(gaia_client_module.GaiaClient, "request", _boom)
+    r = submit_leave(**_common_args(), tool_context=_ctx())
+    assert not r["success"] and r["error_type"] == "gaia_error"
+    assert "connection refused" in r["message"]

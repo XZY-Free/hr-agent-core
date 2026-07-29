@@ -16,10 +16,24 @@
 4. 连通性冒烟：`uv run python -c "from hr_agent.knowledge.agentkit_backend import AgentKitKnowledgeBackend as B; print(B().search('迟到扣款','policy',3))"` 应返回真库内容
 5. 重跑评测 A.2；对比 stub 期答案质量，检索差的在 AgentKit 控制台调分段/参数
 
-## C. 请假提交接口（拿到接口文档后）
-1. 实现 `hr_agent/tools/gaia/submit.py::_do_submit`（映射 LeaveForm payload → 真实接口）
-2. 新增 mock 单测；沙箱环境真调一次
-3. `.env`: `GAIA_DRY_RUN=false` 灰度开启
+## C. 请假提交 —— ✅ 无需接口，当前已是正式形态
+
+> **2026-07-25 业务确认**（见 `迁移梳理/接口适配清单.md` §8、迁移梳理报告 §9.3）：
+> 调用链为「后端 → 智能体」，智能体**只输出请假单 JSON**，由后端拿到 JSON 后
+> 自行调用盖亚请假接口提交，**智能体侧无提交动作**。
+>
+> 因此 `GAIA_DRY_RUN=true`（默认）返回的 `{"submitted": false, "form": payload}`
+> 就是交付形态，不是待补的临时实现。此前把本项列为"待接口文档"是记录错误。
+
+若将来改为智能体直连提交，`submit.py::_do_submit` 已有可运行的示例实现
+（`GAIA_DRY_RUN=false` 启用，3 条 mock 单测覆盖成功/接口失败/网络异常），
+拿到接口文档后需核对三处：
+
+1. `GAIA_SUBMIT_PATH`（默认 `/atd-webapi/api/gaiaStandard/leave/submitLeaveApply/{corp_id}`，
+   按盖亚同类接口形态占位）与 `GAIA_SUBMIT_ENV`（默认 `sandbox`）
+2. payload 字段名——当前沿用 `LeaveForm.to_submit_payload()` 的旧系统
+   leave_support 结构并补 `employeeId`
+3. 成功判定——当前按 `result=true` 且 `code=200`，失败取 `message`
 
 ## D. 部署（拿到火山账号后）
 按 deploy/README.md：本地 client 验证 state 传参与 [[JUMP]] 透传 → agentkit deploy → 线上重验

@@ -112,7 +112,7 @@
   turns: ["年假能跨年用吗"]
   expect_keywords: ["还想了解"]
 
-- id: consult_transfer
+- id: policy_sick_pay
   turns: ["公司的病假工资制度是怎么规定的"]
   expect_tool: [kb_search]
   expect_not_keywords: ["敬请期待"]
