@@ -6,5 +6,16 @@
 - 生产运行（agent.py）不走 conftest，由 .env 提供真实 Key。
 """
 import os
+from pathlib import Path
+
+# pytest 默认不加载 .env，需在此主动加载，否则真实 Key 在 conftest 执行时尚未入环境，
+# 下方 setdefault 会把 dummy 设进去导致评测永远 skip。
+_env_file = Path(__file__).resolve().parent.parent / ".env"
+if _env_file.exists():
+    for _line in _env_file.read_text(encoding="utf-8").splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _, _v = _line.partition("=")
+            os.environ.setdefault(_k.strip(), _v.strip())
 
 os.environ.setdefault("MODEL_AGENT_API_KEY", "dummy-for-struct-test-only")
