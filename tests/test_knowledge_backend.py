@@ -47,8 +47,17 @@ def test_factory_returns_agentkit_when_env_set(monkeypatch):
     assert isinstance(b, AgentKitKnowledgeBackend)
 
 
-def test_agentkit_search_raises_not_implemented():
+def test_agentkit_search_converts_entries(monkeypatch):
+    """真库检索：挂桩 _search_raw，验证原始 result_list → {content,source,score} 转换。"""
+    from hr_agent.knowledge import agentkit_backend
     from hr_agent.knowledge.agentkit_backend import AgentKitKnowledgeBackend
+
+    def fake_search_raw(kb, collection, query, top_k):
+        return [{"content": "迟到扣款五十元", "source": "考勤制度.md", "score": 0.92}]
+
+    monkeypatch.setattr(agentkit_backend, "_search_raw", fake_search_raw)
+    monkeypatch.setattr(agentkit_backend, "_get_kb", lambda c: object())
+    monkeypatch.setattr(agentkit_backend, "_KB_CACHE", {})
 
     b = AgentKitKnowledgeBackend(
         collection_map={
@@ -58,6 +67,51 @@ def test_agentkit_search_raises_not_implemented():
             "childcare": "col-childcare",
         }
     )
-    with pytest.raises(NotImplementedError) as exc_info:
-        b.search("test", scope="policy")
-    assert "待接入" in str(exc_info.value)
+    r = b.search("迟到扣款", scope="policy", top_k=5)
+    assert r and r[0]["content"] == "迟到扣款五十元"
+    assert r[0]["source"] == "考勤制度.md"
+    assert r[0]["score"] == 0.92
+
+
+def test_agentkit_scope_all_merges_three_libs(monkeypatch):
+    """scope=all 应检索 policy+handbook+salary 三库（不含 childcare）。"""
+    from hr_agent.knowledge import agentkit_backend
+    from hr_agent.knowledge.agentkit_backend import AgentKitKnowledgeBackend
+
+    called = []
+
+    def fake_search_raw(kb, collection, query, top_k):
+        called.append(collection)
+        return [{"content": f"hit@{collection}", "source": collection, "score": 0.0}]
+
+    monkeypatch.setattr(agentkit_backend, "_search_raw", fake_search_raw)
+    monkeypatch.setattr(agentkit_backend, "_get_kb", lambda c: object())
+    monkeypatch.setattr(agentkit_backend, "_KB_CACHE", {})
+
+    b = AgentKitKnowledgeBackend(collection_map={
+        "policy": "p", "handbook": "h", "salary": "s", "childcare": "c"})
+    r = b.search("x", scope="all", top_k=5)
+
+    assert called == ["p", "h", "s"]          # 只查三库，不含 childcare
+    assert len(r) == 3
+    assert {x["content"] for x in r} == {"hit@p", "hit@h", "hit@s"}
+
+
+def test_agentkit_search_swallows_single_lib_failure(monkeypatch):
+    """单库检索异常不阻断其他库。"""
+    from hr_agent.knowledge import agentkit_backend
+    from hr_agent.knowledge.agentkit_backend import AgentKitKnowledgeBackend
+
+    def fake_search_raw(kb, collection, query, top_k):
+        if collection == "p":
+            raise RuntimeError("viking auth failed")
+        return [{"content": "ok", "source": collection, "score": 0.0}]
+
+    monkeypatch.setattr(agentkit_backend, "_search_raw", fake_search_raw)
+    monkeypatch.setattr(agentkit_backend, "_get_kb", lambda c: object())
+    monkeypatch.setattr(agentkit_backend, "_KB_CACHE", {})
+
+    b = AgentKitKnowledgeBackend(collection_map={
+        "policy": "p", "handbook": "h", "salary": "s", "childcare": "c"})
+    r = b.search("x", scope="all", top_k=5)
+    assert len(r) == 2                        # policy 失败，handbook+salary 仍返回

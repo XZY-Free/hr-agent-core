@@ -8,7 +8,17 @@ class FakeContext:
     state = {}
 
 
-def test_kb_search_normal_hit():
+@pytest.fixture
+def stub_backend(monkeypatch):
+    """强制走本地桩后端，不依赖全局 .env 的 KB_BACKEND（真库模式下单测仍测桩行为）。"""
+    from hr_agent.knowledge.local_stub import LocalStubBackend
+
+    monkeypatch.setattr(
+        "hr_agent.tools.rules.kb_search.get_backend", lambda: LocalStubBackend()
+    )
+
+
+def test_kb_search_normal_hit(stub_backend):
     ctx = FakeContext()
     r = kb_search("迟到扣款", scope="policy", tool_context=ctx)
     assert r["success"] is True
@@ -17,7 +27,7 @@ def test_kb_search_normal_hit():
     assert r["data"][0]["source"] == "policy.md"
 
 
-def test_kb_search_empty_result():
+def test_kb_search_empty_result(stub_backend):
     ctx = FakeContext()
     r = kb_search("xyz_not_exist", scope="policy", tool_context=ctx)
     assert r["success"] is True
