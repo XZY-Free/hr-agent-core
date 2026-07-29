@@ -30,5 +30,11 @@ def jump_marker_callback(callback_context, llm_response):
         return None
 
     last_text_part.text = last_text_part.text + f"\n[[JUMP:{code}]]"
-    state.pop("pending_jump", None)
+    # 消费后清除，防止重复注入。ADK 的 State 没有 pop()，只能置 None；
+    # 单测用的是普通 dict（有 pop），两种对象都要正确清除。
+    pop = getattr(state, "pop", None)
+    if pop is not None:
+        pop("pending_jump", None)
+    else:
+        state["pending_jump"] = None
     return llm_response
