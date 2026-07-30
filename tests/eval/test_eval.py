@@ -6,8 +6,10 @@
 挂桩策略：monkeypatch hr_agent.tools.gaia.client.GaiaClient.request，
 按 path 分派固定响应（员工 sex=F、排班 7-27 OFF、年假余额 remain=4 等）。
 """
+import json
 import os
-from datetime import date, timedelta
+import time
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -171,25 +173,115 @@ def _collect_event_data(events):
     若不过滤，最终文本会混入完整推理链（"让我想想...首先..."），污染关键词断言。
     对齐 veADK Runner.run() 的处理：跳过 thought part，只收真实输出。
     """
-    tool_calls = []
-    final_texts = []
+    trace = _collect_turn(events)
+    return trace["tool_calls"], trace["text"]
+
+
+def _collect_turn(events) -> dict:
+    """把一轮事件流拆成可读轨迹：工具调用（名/参数/返回）、思考量、输出文本。
+
+    thought part 只统计字数不进 text——doubao-seed-1.6 是推理模型，推理链混进
+    最终文本会污染关键词断言（对齐 veADK Runner.run() 的处理）。
+    """
+    steps, tool_calls, texts = [], [], []
+    thought_chars = 0
     for ev in events:
         if not ev.content or not ev.content.parts:
             continue
+        author = getattr(ev, "author", None)
         for p in ev.content.parts:
             fc = getattr(p, "function_call", None)
             if fc is not None and getattr(fc, "name", None):
                 tool_calls.append(fc.name)
+                steps.append({"kind": "call", "author": author, "name": fc.name,
+                              "args": dict(fc.args or {})})
+                continue
+            fr = getattr(p, "function_response", None)
+            if fr is not None and getattr(fr, "name", None):
+                steps.append({"kind": "result", "author": author, "name": fr.name,
+                              "response": fr.response})
+                continue
             txt = getattr(p, "text", None)
-            if txt is not None and txt.strip() and not getattr(p, "thought", False):
-                final_texts.append(txt)
-    return tool_calls, "\n".join(final_texts)
+            if txt is None or not txt.strip():
+                continue
+            if getattr(p, "thought", False):
+                thought_chars += len(txt)
+                steps.append({"kind": "thought", "author": author, "chars": len(txt)})
+            else:
+                texts.append(txt)
+                steps.append({"kind": "text", "author": author, "text": txt})
+    return {"steps": steps, "tool_calls": tool_calls,
+            "text": "\n".join(texts), "thought_chars": thought_chars}
+
+
+# ---------- 执行轨迹日志 ----------
+# 评测跑批的失败分两类：模型行为不符期望（断言失败）与基础设施故障（连接错误）。
+# 两者在 pytest 输出里混在一起，且全量跑 22 条要 12 分钟、看不到中间过程，无法
+# 判断"某条为何失败"。故逐 case 落盘完整轨迹：工具调用+参数+返回、思考量、
+# 每轮耗时、相对跑批开始的时间偏移（用于判断故障是否与累积运行时长相关）。
+EVAL_LOG_DIR = Path(__file__).parent / "logs"
+_RUN_START = time.monotonic()
+
+
+def _fmt(value, limit: int = 400) -> str:
+    """紧凑单行展示，超长截断——知识库检索返回可达数千字。"""
+    text = json.dumps(value, ensure_ascii=False, default=str) if not isinstance(value, str) else value
+    text = " ".join(text.split())
+    return text if len(text) <= limit else f"{text[:limit]}…（共 {len(text)} 字）"
+
+
+@pytest.fixture(scope="session")
+def eval_log_path() -> Path:
+    """整次跑批共用一个日志文件，逐 case 追加并即时 flush（中途崩溃也留证据）。"""
+    EVAL_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    path = EVAL_LOG_DIR / f"eval-{datetime.now():%Y%m%d-%H%M%S}.log"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(f"# 评测执行轨迹 {datetime.now():%Y-%m-%d %H:%M:%S}\n"
+                f"# 今天={_TODAY.isoformat()} 休息日桩={_day(REST_DAY_OFFSET)} "
+                f"排班窗口={_day(-7)}..{_day(14)}\n")
+    print(f"\n[eval] 执行轨迹日志：{path}")
+    return path
+
+
+@pytest.fixture
+def trace(request, eval_log_path):
+    """收集单个 case 的执行轨迹。teardown 必定执行，故通过与失败都会落盘。"""
+    rec = {"case": request.node.callspec.params["case"]["id"],
+           "offset": time.monotonic() - _RUN_START, "turns": [], "error": None}
+    yield rec
+    _write_trace(eval_log_path, rec)
+
+
+def _write_trace(path: Path, rec: dict) -> None:
+    lines = [f"\n{'=' * 78}",
+             f"[{rec['case']}] 开跑于跑批第 {rec['offset']:.0f}s"]
+    for t in rec["turns"]:
+        lines.append(f"\n  ── 第 {t['index'] + 1} 轮（{t['elapsed']:.1f}s）"
+                     f" 用户：{_fmt(t['user'], 200)}")
+        for s in t["trace"]["steps"]:
+            who = s.get("author") or "?"
+            if s["kind"] == "call":
+                lines.append(f"     → [{who}] 调用 {s['name']}({_fmt(s['args'], 200)})")
+            elif s["kind"] == "result":
+                lines.append(f"     ← [{who}] {s['name']} 返回 {_fmt(s['response'])}")
+            elif s["kind"] == "thought":
+                lines.append(f"     · [{who}] 思考 {s['chars']} 字")
+            else:
+                lines.append(f"     ✎ [{who}] {_fmt(s['text'], 600)}")
+    if rec["error"]:
+        lines.append(f"\n  ✗ 异常：{rec['error']}")
+    lines.append(f"\n  结论：{rec.get('outcome', '未记录')}")
+    with open(path, "a", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", CASES, ids=[c["id"] for c in CASES])
-async def test_eval_case(case, stub_gaia, stub_requests):
-    """逐 case 跑多轮对话，断言 expect_tool / expect_no_tool / expect_keywords / expect_not_keywords / expect_marker。"""
+async def test_eval_case(case, stub_gaia, stub_requests, trace):
+    """逐 case 跑多轮对话，断言 expect_tool / expect_no_tool / expect_keywords / expect_not_keywords / expect_marker。
+
+    执行轨迹落盘到 tests/eval/logs/，用于区分"模型行为不符期望"与"基础设施故障"。
+    """
     # 延迟 import Runner：避免无 Key 时模块加载就触发 root_agent 实例化失败
     from veadk import Runner
 
@@ -207,20 +299,46 @@ async def test_eval_case(case, stub_gaia, stub_requests):
     tool_calls: list[str] = []
     final_text = ""
     for i, turn in enumerate(case["turns"]):
+        user_msg = _resolve_dates(turn)
+        started = time.monotonic()
         events = []
-        async for ev in runner.run_async(
-            user_id="eval-user",
-            session_id=session_id,
-            new_message=_user_content(_resolve_dates(turn)),
-            state_delta=BIZ_STATE if i == 0 else None,
-        ):
-            events.append(ev)
-        tc, ft = _collect_event_data(events)
-        tool_calls.extend(tc)
-        if ft:
-            final_text = ft
+        try:
+            async for ev in runner.run_async(
+                user_id="eval-user",
+                session_id=session_id,
+                new_message=_user_content(user_msg),
+                state_delta=BIZ_STATE if i == 0 else None,
+            ):
+                events.append(ev)
+        except Exception as e:
+            # 连接类故障与模型行为问题要能分辨：记下发生在第几轮、已跑多久
+            trace["error"] = f"{type(e).__name__}: {e}"
+            trace["turns"].append({"index": i, "user": user_msg,
+                                   "elapsed": time.monotonic() - started,
+                                   "trace": _collect_turn(events)})
+            trace["outcome"] = f"异常中断于第 {i + 1} 轮"
+            raise
+        turn_trace = _collect_turn(events)
+        trace["turns"].append({"index": i, "user": user_msg,
+                               "elapsed": time.monotonic() - started,
+                               "trace": turn_trace})
+        tool_calls.extend(turn_trace["tool_calls"])
+        if turn_trace["text"]:
+            final_text = turn_trace["text"]
+
+    trace["outcome"] = f"跑完 {len(case['turns'])} 轮，工具={tool_calls}"
 
     # ---------- 断言期望 ----------
+    # 包一层：断言失败的具体原因要写进轨迹日志，否则事后只能看到 pytest 的截断输出
+    try:
+        _assert_case(case, tool_calls, final_text)
+    except AssertionError as e:
+        trace["outcome"] = f"断言失败 —— {e}"
+        raise
+    trace["outcome"] = f"通过（工具={tool_calls}）"
+
+
+def _assert_case(case: dict, tool_calls: list[str], final_text: str) -> None:
     if "expect_tool" in case:
         for t in case["expect_tool"]:
             assert t in tool_calls, (
