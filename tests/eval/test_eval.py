@@ -136,11 +136,22 @@ def stub_gaia(monkeypatch):
 
 
 class _FakeResp:
+    """挂桩文档下载。内容取多段落的真实通知形态——早先用的是单行
+    "# test\\nhello world"，内容太短会诱导模型照抄原文（连转义符一起抄），
+    验不到"读懂文档并转述关键信息"这个真正要测的能力。"""
+
     status_code = 200
-    headers = {"Content-Length": "100"}
+    headers = {"Content-Length": "400"}
 
     def iter_content(self, chunk_size=8192):
-        yield b"# test\nhello world"
+        yield (
+            "# 2026 年春节假期安排通知\n\n"
+            "一、放假时间：2 月 16 日至 2 月 22 日，共 7 天，2 月 23 日（周一）正常上班。\n"
+            "二、值班安排：假期值班人员由各部门自行排定，值班表请于 2 月 10 日前\n"
+            "报人力资源部备案，值班当日按加班处理。\n"
+            "三、考勤要求：节前最后一个工作日与节后首个工作日均需正常打卡，\n"
+            "因故不能到岗的请提前提交请假申请。\n"
+        ).encode("utf-8")
 
     def raise_for_status(self):
         pass

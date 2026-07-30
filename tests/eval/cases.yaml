@@ -139,10 +139,14 @@
   expect_keywords: ["21"]
 
 - id: doc_qa
-  # 挂桩文档内容为 "# test\nhello world"，验真的读了文档而非只调了工具
+  # 挂桩文档是多段落的春节假期通知（放假时间/值班安排/考勤要求三条）。验模型
+  # 真读懂并转述了关键信息，而非只调了工具——早先桩内容是单行 "hello world"，
+  # 太短会诱导模型照抄原文（连转义符一起抄），验不到文档理解能力
   turns: ["https://example.com/notice.docx 这份文件说了什么"]
   expect_tool: [parse_document]
-  expect_any_keyword: ["hello", "test"]
+  expect_keywords: ["值班"]
+  expect_any_keyword: ["春节", "放假", "假期"]
+  expect_not_keywords: ["\\n"]   # 不应把转义符原样吐出来
 
 - id: followup_present
   turns: ["年假能跨年用吗"]
