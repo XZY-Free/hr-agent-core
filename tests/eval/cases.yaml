@@ -144,9 +144,17 @@
   turns: ["年假能跨年用吗"]
   expect_keywords: ["还想了解"]
 
-- id: policy_sick_pay
-  turns: ["公司的病假工资制度是怎么规定的"]
+- id: policy_probation
+  # 原为 policy_sick_pay（"病假工资制度"），但真库没有病假工资内容——三种问法
+  # top score 均 ≤0.29，召回的都是医疗期天数表与病假条审批规则。模型据此诚实
+  # 拒答是正确行为，可这条 case 就验不到"制度咨询"能力了（拒答已由
+  # kb_empty_honest 覆盖），断言全绿反而掩盖了知识库缺口。缺口记在 CHECKLIST B。
+  # 换成真库覆盖良好的试用期转正（top score 0.356），同时补上现有 22 条完全
+  # 没覆盖的"入离职/人事办理"范畴。
+  turns: ["试用期转正的审批流程是什么"]
   expect_tool: [kb_search]
+  expect_keywords: ["转正"]
+  expect_any_keyword: ["HRBP", "推送", "发起", "审批"]
   expect_not_keywords: ["敬请期待"]
 
 - id: transparent_data
