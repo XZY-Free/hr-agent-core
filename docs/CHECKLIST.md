@@ -50,11 +50,12 @@
    leave_support 结构并补 `employeeId`
 3. 成功判定——当前按 `result=true` 且 `code=200`，失败取 `message`
 
-## D. 部署（拿到火山账号后）
-1. ~~本地 client 验证 state 传参与 [[JUMP]] 透传~~ ✅ 2026-07-30 已通过（详见 deploy/README.md；
-   顺带修了查询工具失败时假转人工的降级缺陷）。**待盖亚真凭据重验验证①**
-2. `agentkit config` / `agentkit deploy`——确认知识库那套火山 AK/SK 是否有 AgentKit Runtime 权限
-3. 部署后用 local_client.py 改 `--base-url` 线上重验
+## D. 部署 —— ✅ 已上线（2026-07-30）
+1. ~~本地 client 验证 state 传参与 [[JUMP]] 透传~~ ✅（顺带修了查询工具失败时假转人工的降级缺陷）
+2. ~~agentkit config / launch~~ ✅ 已部署到 AgentKit Runtime，
+   endpoint 与云资源清单见 deploy/README.md（**资源在计费，不用时 `agentkit destroy`**）
+3. ~~线上重验~~ ✅ state 传参 / 查询降级 / JUMP 透传 / 真 Viking 库检索均通过
+4. 后续：改代码后 `uv run agentkit launch` 重部署（endpoint 不变），详见 deploy/README.md
 
 ## E. 响应延迟 —— ✅ 已实测定论：关闭 thinking
 

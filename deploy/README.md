@@ -53,28 +53,51 @@ uv run python scripts/local_client.py --base-url http://localhost:8000 \
 - **待真凭据重验**：拿到盖亚真实 `corp_id` / `client_secret` 后重跑 `local_client.py`，
   验证①应返回真实余额数字而非"查询失败"。
 
-### Step 3：待环境
+### Step 3：✅ 已部署（2026-07-30）
 
-- **阻塞原因**：无火山引擎云账号，无法执行 `agentkit config` / `agentkit deploy`。
-  注意 `.env` 里已有知识库用的 `VOLCENGINE_ACCESS_KEY/SECRET_KEY`——若该账号开通了
-  AgentKit Runtime 权限，部署即无外部阻塞，可先确认这一点。
-- **解除条件**：拿到云账号后，按 [AgentKit Runtime Quick Start](https://volcengine.github.io/agentkit-sdk-python) 执行部署，随后用 `local_client.py` 改 `--base-url` 为部署地址重跑两个验证项。
+**Endpoint：`https://s6ifts5crqam93ibb6o7p.apigateway-cn-beijing.volceapi.com`**
+（key_auth：`Authorization: Bearer <ApiKey>`，key 值从
+`agentkit runtime get -r r-yerqme2fb4gumvo41qdj --output json` 的
+`AuthorizerConfiguration.KeyAuth.ApiKey` 取）
+
+线上验证结果（local_client.py --base-url <endpoint> --apikey <key>）：
+
+| 项 | 结果 |
+|---|---|
+| 会话注入 4 个业务变量（state 传参） | ✅ |
+| 验证① 查询降级行为（dummy 盖亚凭据 → "查询失败，请稍后重试"） | ✅ |
+| 验证② SSE 含完整 `[[JUMP:punch-details]]` | ✅ |
+| 真 Viking 知识库检索（`agentkit invoke "迟到扣款制度是什么样的"` 答出分段计费规则） | ✅ |
+
+自动创建的云资源（均在计费）：TOS bucket `agentkit-platform-2101533667`、
+CR 仓库 `agentkit/hr-agent-vkba`、Pipeline `hr-agent-nbgplh40`、
+Runtime `r-yerqme2fb4gumvo41qdj`（2C4G，MinInstance 1 / Max 10）、API Key `API-KEY-u17dymup`。
+**不用时记得 `agentkit destroy` 释放。**
 
 ---
 
-## AgentKit 部署（待环境）
+## AgentKit 部署 / 更新
 
-具备云账号后执行（CLI 命令以官方 Runtime Quick Start 为准）：
+首次部署已完成（`agentkit config` 生成 `agentkit.yaml` + `agentkit launch`）。
+`agentkit.yaml` 含密钥已 gitignore；`requirements.txt` 由
+`uv export --no-dev --no-hashes -o requirements.txt` 再生成，也不入库。
+
+**改代码后重新部署**（在 hr-agent 目录，先导出 AK/SK）：
 
 ```bash
-# 1. 配置 AgentKit Runtime（云账号 AK/SK、应用名等）
-agentkit config
+set -a && . ./.env && set +a
+uv export --no-dev --no-hashes -o requirements.txt   # 依赖有变化时
+uv run agentkit launch                                # 重新构建+部署，endpoint 不变
+```
 
-# 2. 部署到 AgentKit Runtime
-agentkit deploy
+**改运行时环境变量**：编辑 `agentkit.yaml` 的 `common.runtime_envs` 后重新 `launch`。
 
-# 3. 部署后用 local_client.py 改 base_url 重跑两个验证项
-uv run python scripts/local_client.py --base-url <部署地址> \
-    --employee-id E001 --corp-id <盖亚租户ID> \
-    --client-secret <盖亚应用密钥> --grant-type client_credentials
+**线上重验**：
+
+```bash
+# 先取 API Key（见上），然后
+uv run python scripts/local_client.py \
+    --base-url https://s6ifts5crqam93ibb6o7p.apigateway-cn-beijing.volceapi.com \
+    --apikey <ApiKey> --employee-id E001 \
+    --corp-id <盖亚租户ID> --client-secret <盖亚应用密钥> --grant-type client_credentials
 ```

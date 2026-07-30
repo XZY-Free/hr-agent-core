@@ -5,3 +5,5 @@ __pycache__/
 .pytest_cache/
 .omc/
 tests/eval/logs/
+agentkit.yaml
+requirements.txt

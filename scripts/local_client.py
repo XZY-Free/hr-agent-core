@@ -22,13 +22,15 @@ APP_NAME = "root_agent"  # 与 agent.py 中 root_agent.name 一致
 USER_ID = "local-debug-user"
 
 
-def _post_json(base_url: str, path: str, body: dict[str, Any]) -> dict:
-    resp = requests.post(f"{base_url}{path}", json=body, timeout=30)
+def _post_json(base_url: str, path: str, body: dict[str, Any],
+               headers: dict[str, str] | None = None) -> dict:
+    resp = requests.post(f"{base_url}{path}", json=body, headers=headers, timeout=30)
     resp.raise_for_status()
     return resp.json()
 
 
-def create_session(base_url: str, session_id: str, state: dict[str, Any]) -> dict:
+def create_session(base_url: str, session_id: str, state: dict[str, Any],
+                   headers: dict[str, str] | None = None) -> dict:
     """创建会话并写入业务变量到 state。
 
     ADK 协议：POST /apps/{app}/users/{user}/sessions，body 可带 state。
@@ -37,11 +39,13 @@ def create_session(base_url: str, session_id: str, state: dict[str, Any]) -> dic
         base_url,
         f"/apps/{APP_NAME}/users/{USER_ID}/sessions",
         {"session_id": session_id, "state": state},
+        headers,
     )
 
 
 def run_sse(base_url: str, session_id: str, text: str,
-            state_delta: dict[str, Any] | None = None) -> str:
+            state_delta: dict[str, Any] | None = None,
+            headers: dict[str, str] | None = None) -> str:
     """发消息并以 SSE 流方式收集最终文本。
 
     返回所有文本 part 拼接（用于断言关键词与 JUMP 标记）。
@@ -58,7 +62,7 @@ def run_sse(base_url: str, session_id: str, text: str,
 
     final_text_parts: list[str] = []
     with requests.post(
-        f"{base_url}/run_sse", json=body, stream=True, timeout=120
+        f"{base_url}/run_sse", json=body, headers=headers, stream=True, timeout=120
     ) as resp:
         resp.raise_for_status()
         for raw in resp.iter_lines(decode_unicode=True):
@@ -79,11 +83,12 @@ def run_sse(base_url: str, session_id: str, text: str,
     return "\n".join(final_text_parts)
 
 
-def verify(base_url: str, biz_vars: dict[str, Any]) -> int:
+def verify(base_url: str, biz_vars: dict[str, Any],
+           headers: dict[str, str] | None = None) -> int:
     session_id = "local-debug-session"
     print(f"[1/3] 创建会话 session_id={session_id}，注入业务变量…")
     try:
-        create_session(base_url, session_id, biz_vars)
+        create_session(base_url, session_id, biz_vars, headers)
         print("     会话创建成功。")
     except Exception as e:
         print(f"     会话创建失败：{e}", file=sys.stderr)
@@ -94,7 +99,7 @@ def verify(base_url: str, biz_vars: dict[str, Any]) -> int:
         return 1
 
     print("[2/3] 验证①：发消息「我还有几天年假？」观察工具能否读到 state…")
-    text1 = run_sse(base_url, session_id, "我还有几天年假？")
+    text1 = run_sse(base_url, session_id, "我还有几天年假？", headers=headers)
     print(f"     回复：{text1!r}")
     # 验证①判定：回复中应出现余额数字（来自盖亚接口），或服务日志中出现盖亚请求
     if not text1:
@@ -103,7 +108,7 @@ def verify(base_url: str, biz_vars: dict[str, Any]) -> int:
     print("     ✓ 已收到回复，请人工确认服务日志中盖亚请求已发出（含 Bearer JWT）。")
 
     print("[3/3] 验证②：发消息「打开打卡明细」验证 JUMP 标记…")
-    text2 = run_sse(base_url, session_id, "打开打卡明细")
+    text2 = run_sse(base_url, session_id, "打开打卡明细", headers=headers)
     print(f"     回复：{text2!r}")
     if "[[JUMP:punch-details]]" not in text2:
         print("     ✗ 未在 SSE 最终文本中找到 [[JUMP:punch-details]] 标记。")
@@ -119,6 +124,11 @@ def main():
     parser.add_argument("--corp-id", default="corp1")
     parser.add_argument("--client-secret", default="sec")
     parser.add_argument("--grant-type", default="client_credentials")
+    parser.add_argument(
+        "--apikey", default=None,
+        help="线上 Runtime 的 API Key（key_auth），本地调试用不到；"
+             "从 `agentkit runtime get -r <id>` 的 AuthorizerConfiguration.KeyAuth.ApiKey 取",
+    )
     args = parser.parse_args()
 
     biz_vars = {
@@ -127,7 +137,8 @@ def main():
         "client_secret": args.client_secret,
         "grant_type": args.grant_type,
     }
-    sys.exit(verify(args.base_url, biz_vars))
+    headers = {"Authorization": f"Bearer {args.apikey}"} if args.apikey else None
+    sys.exit(verify(args.base_url, biz_vars, headers))
 
 
 if __name__ == "__main__":
