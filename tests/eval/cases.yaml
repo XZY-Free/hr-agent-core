@@ -23,10 +23,12 @@
   expect_keywords: ["年休假", "提交"]
 
 - id: missing_type_asks
-  # 缺类型必须追问而不是直接提交——同时验"确实问了类型"，不只是没提交
+  # 缺类型必须追问而不是直接提交。只验必含"类型"二字——追问措辞多变
+  #（"什么类型"/"类型是什么"/"哪种类型"），枚举短语必然漏；不提交由
+  # expect_no_tool 保证
   turns: ["我明天想请假"]
   expect_no_tool: [submit_leave]
-  expect_any_keyword: ["什么类型", "哪种", "假期类型", "什么假", "哪一种"]
+  expect_keywords: ["类型"]
 
 - id: multi_type_rejected
   # 多种假期应引导分开提交；模型可能用"分开"或"先选其中一种"等同义表达
@@ -55,13 +57,13 @@
   # （后者内部也会调 get_leave_balance）。验答出桩数据的 4 天，不只验调了工具
   turns: ["我还有几天年假？"]
   expect_any_tool: [get_leave_balance, calc_annual_leave]
-  expect_any_keyword: ["4天", "4 天"]
+  expect_any_keyword: ["4天", "4 天", "四天"]
 
 - id: annual_calc
   # 桩员工工龄 6 年（<10 年档）→ 折算 5 天
   turns: ["我的年假是怎么折算的？"]
   expect_tool: [calc_annual_leave]
-  expect_any_keyword: ["5天", "5 天"]
+  expect_any_keyword: ["5天", "5 天", "五天"]
 
 - id: page_jump_punch
   turns: ["打开打卡明细"]
@@ -100,7 +102,7 @@
   # 真库：四川省育儿假 10 天/年。带单位断言，避免 "10月"/"2010" 之类假命中
   turns: ["四川的育儿假有几天"]
   expect_tool: [kb_search]
-  expect_any_keyword: ["10天", "10 天"]
+  expect_any_keyword: ["10天", "10 天", "十天"]
 
 - id: childcare_asks_province
   # 育儿假按省份而异，未说省份应先追问，不该盲检索
@@ -115,10 +117,15 @@
   expect_not_keywords: ["敬请期待"]
 
 - id: kb_empty_honest
-  # 非人力范畴问题（宠物入职）应被正确拒答，不检索知识库、建议咨询对应部门
+  # 本意（见 id）：知识库覆盖不到的问题要诚实回答、不编造。实测模型在两条都正确
+  # 的路径间摆动：① 先检索求证 → 没命中 → 如实说没查到 + 建议人力资源部门；
+  # ② 直接判断非人力范畴 → 建议行政部门（更高效，省 3 次检索）。故不约束工具——
+  # 在"检索/不检索"上做硬断言，无论押哪边都会周期性掉红。
+  # 工具路由已分别由 non_hr_rejected（明确非人力→不检索）与 consult_transfer
+  #（明确人力→检索）覆盖，这条只验诚实性：如实说没有 + 引导对应部门，不编造制度。
   turns: ["公司对宠物入职有什么规定"]
-  expect_no_tool: [kb_search]
   expect_keywords: ["部门"]
+  expect_any_keyword: ["没有查到", "未查到", "没有找到", "暂时没有", "不属于"]
 
 - id: personal_data_not_kb
   # 个人数据走盖亚接口而非知识库；验答出桩数据的 21 天余额
