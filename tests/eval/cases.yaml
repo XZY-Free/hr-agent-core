@@ -15,11 +15,12 @@
 # 医疗期余额 21 天、前天为休息日）。断言尽量咬住这些桩数据，验答案而非只验路由。
 
 - id: quick_tomorrow
-  # 多轮：首轮模型复述确认（prompt 规定提交前必须复述），用户确认后才 submit
+  # 多轮：首轮模型复述确认（prompt 规定提交前必须复述），用户确认后才 submit。
+  # "提交"作必含词而非枚举成功措辞——模型说法多变（"已提交"/"已成功提交"/
+  # "提交成功"），枚举必然漏；配合 expect_tool 的 submit_leave 已足够严格
   turns: ["明天请一天年休假", "确认"]
   expect_tool: [get_schedule, submit_leave]
-  expect_keywords: ["年休假"]
-  expect_any_keyword: ["已提交", "提交成功", "已经提交", "提交了"]
+  expect_keywords: ["年休假", "提交"]
 
 - id: missing_type_asks
   # 缺类型必须追问而不是直接提交——同时验"确实问了类型"，不只是没提交
@@ -42,11 +43,12 @@
   expect_any_keyword: ["无法", "仅限", "不符"]
 
 - id: rest_day
-  # 前天（stub 休息日）补登事假。验模型查了排班【并且】把休息日结论告知用户——
-  # 无论走"查排班后直接告知"还是"走 submit 被拒后转述"，话术都含"休息"
+  # 前天（stub 休息日）补登事假。验模型查了排班【并且】把"当天不用请假"的结论
+  # 告知用户——无论走"查排班后直接告知"还是"走 submit 被拒后转述话术"都算对，
+  # 措辞按两条路径的常见说法枚举
   turns: ["前天请一天事假", "确认"]
   expect_tool: [get_schedule]
-  expect_any_keyword: ["休息"]
+  expect_any_keyword: ["休息", "无需请假", "不用请假", "不需要请假"]
 
 - id: balance_query
   # "还有几天年假"可走 get_leave_balance，也可走更完整的组合工具 calc_annual_leave
