@@ -40,15 +40,24 @@ uv run python scripts/local_client.py --base-url http://localhost:8000 \
 
 ## 当前阻塞
 
-### Step 1 / Step 2：待 Key 试跑
+### Step 1 / Step 2：✅ 已验证（2026-07-30）
 
-- **阻塞原因**：当前开发环境无真实方舟模型 Key（`MODEL_AGENT_API_KEY`），`agent.py` 起服务时 Agent 实例化会触发 `get_ark_token()` 联网取 token，失败。
-- **已就绪**：`scripts/local_client.py` 已实现完整三步验证逻辑；`agent.py` 入口已对齐官方 hello_world 形态。
-- **解除条件**：在 `.env` 配置真实 `MODEL_AGENT_API_KEY` 后，按上述"本地起服务"+"本地联调验证"两节执行即可。
+- 模型 Key 已配 `.env`，服务可正常起（三个 Agent 实例化成功，`thinking: disabled` 已生效）。
+- **验证①（state 传参管道）**：通过——工具能从 session state 读到 4 个业务变量并尝试发盖亚请求
+  （本地用 dummy 凭据，JWT 获取如预期失败，证明变量已传到工具层）。
+  **顺带抓到一个真缺陷**：查询工具返回 `gaia_error` 时模型竟回"已为您转接人工客服"
+  （假转接，实际没有转接动作）——根因是 prompt 没写工具失败时的降级行为，模型就近抓了
+  handoff 当逃生出口。已在 MAIN prompt 第 3 条补规则：失败如实转述"请稍后重试"，
+  不转人工、不出现技术词汇。修复后复测回"查询失败，请稍后重试。"
+- **验证②（JUMP 透传）**：通过——SSE 最终文本含完整 `[[JUMP:punch-details]]`。
+- **待真凭据重验**：拿到盖亚真实 `corp_id` / `client_secret` 后重跑 `local_client.py`，
+  验证①应返回真实余额数字而非"查询失败"。
 
 ### Step 3：待环境
 
 - **阻塞原因**：无火山引擎云账号，无法执行 `agentkit config` / `agentkit deploy`。
+  注意 `.env` 里已有知识库用的 `VOLCENGINE_ACCESS_KEY/SECRET_KEY`——若该账号开通了
+  AgentKit Runtime 权限，部署即无外部阻塞，可先确认这一点。
 - **解除条件**：拿到云账号后，按 [AgentKit Runtime Quick Start](https://volcengine.github.io/agentkit-sdk-python) 执行部署，随后用 `local_client.py` 改 `--base-url` 为部署地址重跑两个验证项。
 
 ---
