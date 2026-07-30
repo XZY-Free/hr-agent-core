@@ -39,5 +39,21 @@ def test_rest_shift_prefixes_present():
 
 def test_phrases_keys_present():
     for k in ["rest_day", "not_scheduled", "no_permission", "handoff",
-              "cancel_leave", "consult_not_ready"]:
+              "cancel_leave"]:
         assert k in PHRASES and PHRASES[k]
+
+
+def test_handoff_phrase_does_not_bounce_user_back():
+    """转人工话术不能反过来让用户再说一次"转人工"。
+
+    旧工作流没有转接动作，只能输出引导语让用户说出前端识别的关键词，于是
+    用户说"转人工"后被回"请您回复转人工"——死循环。智能体直接确认转接。
+    """
+    assert "请您回复" not in PHRASES["handoff"]
+    assert "转接" in PHRASES["handoff"]
+
+
+def test_no_stale_coming_soon_phrase():
+    """咨询 Agent 二期已上线，"敬请期待"占位话术不该再存在。"""
+    assert "consult_not_ready" not in PHRASES
+    assert all("敬请期待" not in v for v in PHRASES.values())
