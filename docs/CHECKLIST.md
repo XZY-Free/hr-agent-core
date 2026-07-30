@@ -101,14 +101,15 @@ case 随机掉红，全关后连续两轮全绿。
 
 > 附带收益：评测从 11 分钟降到 2.3 分钟，可以连跑多轮验稳定性，回归成本大幅下降。
 
-### E.3 待办
+### E.3 已落地与后续
 
-- [ ] **业务决策**：是否把 `THINKING_DEFAULT=disabled` 设为代码默认值。当前代码默认
-      不下发 thinking 参数（跟随模型默认，即开启），需在 `.env` 显式配置才生效。
-      建议 `.env` 与部署配置都设为 `disabled`；代码默认值是否一并改动请业务确认
+- [x] **`disabled` 已设为代码默认值**（`model_config.py::DEFAULT_THINKING`，8 条单测
+      覆盖）。部署时无需额外配置即为快档；需要推理时显式设 `THINKING_DEFAULT=enabled`，
+      或用 `THINKING_<KEY>` 只给某个 agent 开回来
 - [ ] 若仍嫌慢，下一步可试：把高频意图（余额/医疗期/页面跳转/固定话术）留在
       root_agent 不 transfer（实测这类已 4~14s），或换 doubao-seed-1.6-flash
-      （`MODEL_AGENT_NAME_<KEY>` 可按 agent 换模型，22 条断言可直接当回归基准）
+      （`MODEL_AGENT_NAME_<KEY>` 可按 agent 换模型，22 条断言可直接当回归基准）。
+      当前单轮已降到 5~15s 量级，此项收益递减，待线上叠加盖亚接口耗时后再评估
 - [ ] 前端体感：流式输出 + "正在查询排班…"过程提示
 
 > 注意：评测挂桩了盖亚接口，真实环境还要叠加 7 个 HTTP 接口的网络耗时（JWT

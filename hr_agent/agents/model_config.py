@@ -15,11 +15,16 @@ doubao-seed-1.6 在每一跳（root 判断 → transfer → 子 agent 判断 →
   MODEL_AGENT_NAME_<KEY>        覆盖单个 agent 的模型，KEY ∈ ROOT/LEAVE/CONSULT
   THINKING_DEFAULT              全局 thinking 档位：enabled/disabled/auto
   THINKING_<KEY>                覆盖单个 agent 的 thinking 档位
-不设置时不下发 thinking 参数，即跟随模型默认行为（doubao-seed-1.6 默认思考）。
+
+**缺省为 disabled**，依据 2026-07-30 的对照实验（CHECKLIST E.2）：全关 thinking
+连跑两轮 22/22、耗时 138.9s/139.8s，对比全开的 22/22、656.8s——耗时降 79%，
+通过率不变，稳定性反而更好（全开时每轮都有 1~2 条 case 随机掉红）。回答质量
+逐条比对轨迹后确认不降反升。需要推理时显式设 enabled 即可。
 """
 import os
 
 DEFAULT_MODEL_NAME = "doubao-seed-1.6-250615"
+DEFAULT_THINKING = "disabled"
 VALID_THINKING = ("enabled", "disabled", "auto")
 
 
@@ -32,13 +37,12 @@ def model_for(agent_key: str) -> str:
 def extra_config_for(agent_key: str) -> dict:
     """取该 agent 的 model_extra_config（目前只含 thinking 档位）。
 
-    返回空 dict 表示不下发 thinking 参数。veADK 会把这里的 extra_body 合并进
-    DEFAULT_MODEL_EXTRA_CONFIG（见 veadk/agent.py 的 _build_model_extra_config），
-    故只需给出要覆盖的键。
+    veADK 会把这里的 extra_body 合并进 DEFAULT_MODEL_EXTRA_CONFIG
+    （见 veadk/agent.py 的 model_extra_config 构造），故只需给出要覆盖的键。
     """
-    mode = os.getenv(f"THINKING_{agent_key.upper()}") or os.getenv("THINKING_DEFAULT")
-    if not mode:
-        return {}
+    mode = (os.getenv(f"THINKING_{agent_key.upper()}")
+            or os.getenv("THINKING_DEFAULT")
+            or DEFAULT_THINKING)
     mode = mode.strip().lower()
     if mode not in VALID_THINKING:
         raise ValueError(
