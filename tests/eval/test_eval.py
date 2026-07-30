@@ -298,6 +298,7 @@ async def test_eval_case(case, stub_gaia, stub_requests, trace):
 
     tool_calls: list[str] = []
     final_text = ""
+    all_texts: list[str] = []
     for i, turn in enumerate(case["turns"]):
         user_msg = _resolve_dates(turn)
         started = time.monotonic()
@@ -325,20 +326,31 @@ async def test_eval_case(case, stub_gaia, stub_requests, trace):
         tool_calls.extend(turn_trace["tool_calls"])
         if turn_trace["text"]:
             final_text = turn_trace["text"]
+            all_texts.append(turn_trace["text"])
 
     trace["outcome"] = f"跑完 {len(case['turns'])} 轮，工具={tool_calls}"
 
     # ---------- 断言期望 ----------
     # 包一层：断言失败的具体原因要写进轨迹日志，否则事后只能看到 pytest 的截断输出
     try:
-        _assert_case(case, tool_calls, final_text)
+        _assert_case(case, tool_calls, final_text, "\n".join(all_texts))
     except AssertionError as e:
         trace["outcome"] = f"断言失败 —— {e}"
         raise
     trace["outcome"] = f"通过（工具={tool_calls}）"
 
 
-def _assert_case(case: dict, tool_calls: list[str], final_text: str) -> None:
+def _assert_case(case: dict, tool_calls: list[str], final_text: str,
+                 dialog_text: str) -> None:
+    """断言 case 期望。
+
+    final_text 是最后一轮的回复，dialog_text 是各轮回复拼接。
+    多轮 case 里"结论出现在哪一轮"取决于模型效率——如 rest_day，识别出休息日
+    可能在第 1 轮（查排班后直接告知）也可能在第 2 轮（走 submit 被拒后转述），
+    只看 final_text 会把"更早给出结论"误判为失败。故凡是验"说过某结论"的用
+    expect_*_anywhere 在 dialog_text 上断言；验"最终回复必须是什么"的仍用
+    final_text。
+    """
     if "expect_tool" in case:
         for t in case["expect_tool"]:
             assert t in tool_calls, (
@@ -372,4 +384,14 @@ def _assert_case(case: dict, tool_calls: list[str], final_text: str) -> None:
     if "expect_marker" in case:
         assert case["expect_marker"] in final_text, (
             f"{case['id']}: 期望标记 {case['expect_marker']}，实际 {final_text!r}"
+        )
+    if "expect_keywords_anywhere" in case:
+        for kw in case["expect_keywords_anywhere"]:
+            assert kw in dialog_text, (
+                f"{case['id']}: 期望对话中出现过 '{kw}'，各轮回复 {dialog_text!r}"
+            )
+    if "expect_any_keyword_anywhere" in case:
+        assert any(kw in dialog_text for kw in case["expect_any_keyword_anywhere"]), (
+            f"{case['id']}: 期望对话中出现过其一 {case['expect_any_keyword_anywhere']}，"
+            f"各轮回复 {dialog_text!r}"
         )

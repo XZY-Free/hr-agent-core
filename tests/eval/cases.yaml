@@ -3,7 +3,10 @@
 #   turns: 多轮对话的用户消息列表（按顺序发送）
 #   expect_tool / expect_any_tool: 断言这些工具被调用过 / 命中其一即可
 #   expect_no_tool: 断言这些工具【未被调用】
-#   expect_keywords / expect_any_keyword: 最终回复必含 / 含其一
+#   expect_keywords / expect_any_keyword: 【最后一轮】回复必含 / 含其一
+#   expect_keywords_anywhere / expect_any_keyword_anywhere:
+#       【任意轮】回复出现过即可。多轮 case 里"结论出现在哪一轮"取决于模型效率，
+#       验"说过某结论"时用这组；验"最终回复必须是什么"才用上面那组
 #   expect_not_keywords: 最终回复必不含
 #   expect_marker: 最终回复必含的 JUMP 标记（如 [[JUMP:punch-details]]）
 #
@@ -46,11 +49,12 @@
 
 - id: rest_day
   # 前天（stub 休息日）补登事假。验模型查了排班【并且】把"当天不用请假"的结论
-  # 告知用户——无论走"查排班后直接告知"还是"走 submit 被拒后转述话术"都算对，
-  # 措辞按两条路径的常见说法枚举
+  # 告知用户。用 _anywhere：结论出现在哪一轮取决于模型效率——高效路径是第 1 轮
+  # 查排班后直接告知；也可能第 1 轮先复述确认、第 2 轮走 submit 被拒后转述话术。
+  # 两条都对，只看最后一轮会把"更早给出结论"误判为失败（关 thinking 后实测踩到）
   turns: ["前天请一天事假", "确认"]
   expect_tool: [get_schedule]
-  expect_any_keyword: ["休息", "无需请假", "不用请假", "不需要请假"]
+  expect_any_keyword_anywhere: ["休息", "无需请假", "不用请假", "不需要请假"]
 
 - id: balance_query
   # "还有几天年假"可走 get_leave_balance，也可走更完整的组合工具 calc_annual_leave
