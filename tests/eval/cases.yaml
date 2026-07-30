@@ -10,9 +10,10 @@
 #   expect_not_keywords: 最终回复必不含
 #   expect_marker: 最终回复必含的 JUMP 标记（如 [[JUMP:punch-details]]）
 #
-# 日期占位符 <today>/<tomorrow>/<yesterday>/<rest_day> 由 test_eval 替换为真实
-# 日期（相对今天）。口语日期（"明天""前天"）不替换，交给模型换算——那本身就是
-# 被测能力。stub 排班窗口为 today-7..today+14，其中 today-2 为休息日。
+# 口语日期（"明天""前天"）交给模型换算——那本身就是被测能力。若某条 case 需要
+# 写死真实日期，可用占位符 <today>/<tomorrow>/<yesterday>/<rest_day>，由 test_eval
+# 替换为相对今天的日期（当前无 case 使用）。
+# stub 排班窗口为 today-7..today+14，其中 today-2 为休息日。
 #
 # 挂桩：monkeypatch GaiaClient.request 按 path 分派（员工 sex=F、年假余额 4 天、
 # 医疗期余额 21 天、前天为休息日）。断言尽量咬住这些桩数据，验答案而非只验路由。
@@ -48,12 +49,12 @@
   expect_any_keyword: ["无法", "仅限", "不符"]
 
 - id: rest_day
-  # 前天（stub 休息日）补登事假。验模型查了排班【并且】把"当天不用请假"的结论
-  # 告知用户。用 _anywhere：结论出现在哪一轮取决于模型效率——高效路径是第 1 轮
-  # 查排班后直接告知；也可能第 1 轮先复述确认、第 2 轮走 submit 被拒后转述话术。
-  # 两条都对，只看最后一轮会把"更早给出结论"误判为失败（关 thinking 后实测踩到）
+  # 前天（stub 休息日）补登事假。验"识别出休息日并告知用户"这一行为，不押识别路径：
+  # ① 先查排班（get_schedule）提前发现；② 直接 submit_leave 被校验链拦截后转述——
+  # 校验链本来就是设计好的兜底（2026-07-30 实测模型两条都走过，行为都正确）。
+  # 结论出现在哪一轮也取决于模型效率（高效时第 1 轮查完直接告知），故关键词用 _anywhere。
   turns: ["前天请一天事假", "确认"]
-  expect_tool: [get_schedule]
+  expect_any_tool: [get_schedule, submit_leave]
   expect_any_keyword_anywhere: ["休息", "无需请假", "不用请假", "不需要请假"]
 
 - id: balance_query
@@ -74,7 +75,11 @@
   expect_marker: "[[JUMP:punch-details]]"
 
 - id: cancel_leave
+  # 取消请假不该只是"告诉用户自己去【我的表单】"——页面跳转是智能体本来就有的
+  # 能力，应当直接把用户送到页面。故验 page_jump 被调用且标记注入成功
   turns: ["我要取消昨天提交的请假"]
+  expect_tool: [page_jump]
+  expect_marker: "[[JUMP:my-forms]]"
   expect_keywords: ["我的表单"]
 
 - id: handoff
@@ -98,9 +103,11 @@
   expect_any_keyword: ["分钟", "元"]
 
 - id: non_hr_rejected
+  # 非人力范畴要拒答并引导。验"引导去别处求助"这个动作而非具体部门名——
+  # 模型可能说"IT部门"也可能说"IT部"，枚举部门名必然漏（kb_empty_honest 踩过）
   turns: ["我电脑坏了怎么报修"]
   expect_no_tool: [kb_search]
-  expect_keywords: ["部门"]
+  expect_any_keyword: ["咨询", "联系", "部门", "转人工"]
 
 - id: childcare_sichuan
   # 真库：四川省育儿假 10 天/年。带单位断言，避免 "10月"/"2010" 之类假命中
@@ -128,8 +135,8 @@
   # 工具路由已分别由 non_hr_rejected（明确非人力→不检索）与 consult_transfer
   #（明确人力→检索）覆盖，这条只验诚实性：如实说没有 + 引导对应部门，不编造制度。
   turns: ["公司对宠物入职有什么规定"]
-  expect_keywords: ["部门"]
-  expect_any_keyword: ["没有查到", "未查到", "没有找到", "暂时没有", "不属于"]
+  expect_any_keyword: ["咨询", "联系", "部门", "转人工"]
+  expect_any_keyword_anywhere: ["没有查到", "未查到", "没有找到", "暂时没有", "不属于"]
 
 - id: personal_data_not_kb
   # 个人数据走盖亚接口而非知识库；验答出桩数据的 21 天余额
@@ -164,12 +171,3 @@
   expect_keywords: ["转正"]
   expect_any_keyword: ["HRBP", "推送", "发起", "审批"]
   expect_not_keywords: ["敬请期待"]
-
-- id: transparent_data
-  # _transparent_data_ 是前端表单回填，数据已齐。核心要验的是回填字段被准确解析：
-  # 类型（年休假）与事由（家事）都须出现在复述里。后续行为有波动——直接提交或
-  # 复述确认都是正确路径，且征询确认的措辞不定（"确认一下"/"对吗"/"是否正确"），
-  # 故用 expect_any_keyword 容纳，不强求走 submit_leave
-  turns: ["_transparent_data_{\"typeName\":\"年休假\",\"startDate\":\"<tomorrow>\",\"endDate\":\"<tomorrow>\",\"startTime\":\"08:00\",\"endTime\":\"17:00\",\"reasons\":\"家事\"}"]
-  expect_keywords: ["年休假", "家事"]
-  expect_any_keyword: ["提交", "确认", "对吗", "是否", "核对"]

@@ -93,7 +93,9 @@ STUB_SCHEDULE_ROWS = [
     for o in range(-7, 15)
 ]
 
-# case 文本里的日期占位符（用尖括号而非大括号，避免与 _transparent_data_ 的 JSON 冲突）
+# case 文本里的日期占位符。用尖括号而非大括号，避免与 case 里可能出现的 JSON 冲突。
+# 当前无 case 使用——口语日期交给模型换算本身就是被测能力；保留是因为日期是本项目
+# 的核心维度，将来若要验跨月/跨年场景需要写死真实日期。
 _DATE_TOKENS = {"<today>": 0, "<tomorrow>": 1, "<yesterday>": -1,
                 "<rest_day>": REST_DAY_OFFSET}
 
@@ -263,9 +265,9 @@ def trace(request, eval_log_path):
     _write_trace(eval_log_path, rec)
 
 
-def _write_trace(path: Path, rec: dict) -> None:
-    lines = [f"\n{'=' * 78}",
-             f"[{rec['case']}] 开跑于跑批第 {rec['offset']:.0f}s"]
+def _format_trace(rec: dict) -> str:
+    """把一个 case 的执行轨迹渲染成可读文本（既写日志，也喂给评判模型）。"""
+    lines = [f"[{rec['case']}] 开跑于跑批第 {rec['offset']:.0f}s"]
     for t in rec["turns"]:
         lines.append(f"\n  ── 第 {t['index'] + 1} 轮（{t['elapsed']:.1f}s）"
                      f" 用户：{_fmt(t['user'], 200)}")
@@ -281,9 +283,13 @@ def _write_trace(path: Path, rec: dict) -> None:
                 lines.append(f"     ✎ [{who}] {_fmt(s['text'], 600)}")
     if rec["error"]:
         lines.append(f"\n  ✗ 异常：{rec['error']}")
-    lines.append(f"\n  结论：{rec.get('outcome', '未记录')}")
+    return "\n".join(lines)
+
+
+def _write_trace(path: Path, rec: dict) -> None:
     with open(path, "a", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write(f"\n{'=' * 78}\n{_format_trace(rec)}\n"
+                f"\n  结论：{rec.get('outcome', '未记录')}\n")
 
 
 @pytest.mark.asyncio
