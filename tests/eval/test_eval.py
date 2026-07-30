@@ -7,6 +7,7 @@
 按 path 分派固定响应（员工 sex=F、排班 7-27 OFF、年假余额 remain=4 等）。
 """
 import os
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -70,13 +71,36 @@ STUB_MEDICAL = {"details": [{"quota": 24, "used": 3, "balance": 21}]}
 STUB_EMPLOYEE = {"details": [{"sex": "F", "socialService": "6 年 4 月 0 天",
                               "socialServiceDate": "2019-11-03"}]}
 
-# 排班：7-27 休息，7-28..7-31 白班
-STUB_SCHEDULE = {"details": {"employeeData": [{"employeeDetailData": [
-    {"shiftDate": "2026-07-27", "shiftCode": "OFF01", "shiftName": "休息",
-     "startTime": "00:00", "endTime": "00:00"},
-    *[{"shiftDate": f"2026-07-{d}", "shiftCode": "SCQY01", "shiftName": "白班",
-       "startTime": "08:00", "endTime": "17:00"} for d in range(28, 32)],
-]}]}}
+# 排班日期相对今天生成，不写死具体日期：写死会随时间推移失效——case 里的
+# "明天"某天就会落到 stub 范围外，模型查不到排班便反复重试直至陷入循环
+# （gender_mismatch 曾因此卡死）。窗口取 today-7..today+14，覆盖补登与提前请假。
+_TODAY = date.today()
+REST_DAY_OFFSET = -2      # 前天为休息日，供 rest_day case 命中
+
+
+def _day(offset: int) -> str:
+    return (_TODAY + timedelta(days=offset)).isoformat()
+
+
+STUB_SCHEDULE_ROWS = [
+    {"shiftDate": _day(o), "shiftCode": "OFF01", "shiftName": "休息",
+     "startTime": "00:00", "endTime": "00:00"}
+    if o == REST_DAY_OFFSET else
+    {"shiftDate": _day(o), "shiftCode": "SCQY01", "shiftName": "白班",
+     "startTime": "08:00", "endTime": "17:00"}
+    for o in range(-7, 15)
+]
+
+# case 文本里的日期占位符（用尖括号而非大括号，避免与 _transparent_data_ 的 JSON 冲突）
+_DATE_TOKENS = {"<today>": 0, "<tomorrow>": 1, "<yesterday>": -1,
+                "<rest_day>": REST_DAY_OFFSET}
+
+
+def _resolve_dates(text: str) -> str:
+    for token, offset in _DATE_TOKENS.items():
+        if token in text:
+            text = text.replace(token, _day(offset))
+    return text
 
 
 def _stub_request(self, env, method, path, *, json_body=None, params=None,
@@ -94,12 +118,11 @@ def _stub_request(self, env, method, path, *, json_body=None, params=None,
         return STUB_EMPLOYEE
     if "getScheduleData" in path:
         # 按请求的日期范围过滤，模拟真实盖亚 API 行为（真实 API 只返回区间内排班）。
-        # 不过滤会导致 get_schedule(07-30,07-30) 拿回整段 07-27..07-31，
-        # submit_leave 取首条 07-27(休息) 误判为休息日。
+        # 不过滤会导致 get_schedule(D,D) 拿回整个窗口，submit_leave 取首条
+        # （可能是休息日）误判。
         sd = (json_body or {}).get("startDate", "")
         ed = (json_body or {}).get("endDate", sd)
-        all_rows = STUB_SCHEDULE["details"]["employeeData"][0]["employeeDetailData"]
-        rows = [r for r in all_rows if sd <= r["shiftDate"] <= ed] or all_rows
+        rows = [r for r in STUB_SCHEDULE_ROWS if sd <= r["shiftDate"] <= ed]
         return {"details": {"employeeData": [{"employeeDetailData": rows}]}}
     return {"result": True, "data": []}
 
@@ -188,7 +211,7 @@ async def test_eval_case(case, stub_gaia, stub_requests):
         async for ev in runner.run_async(
             user_id="eval-user",
             session_id=session_id,
-            new_message=_user_content(turn),
+            new_message=_user_content(_resolve_dates(turn)),
             state_delta=BIZ_STATE if i == 0 else None,
         ):
             events.append(ev)
