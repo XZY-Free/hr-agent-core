@@ -13,7 +13,9 @@ def page_jump(page_name: str, tool_context) -> dict:
         page_name: 跳转意图名（如"打卡明细"）
     """
     if page_name not in PAGE_CODES:
-        return err("unknown_page", f"未知的页面：{page_name}")
+        # 附上可选页面，让模型能自我纠正（换说法重试），而不是把失败甩给用户
+        choices = "、".join(PAGE_CODES)
+        return err("unknown_page", f"未知的页面：{page_name}。可跳转的页面有：{choices}")
     code = PAGE_CODES[page_name]
     tool_context.state["pending_jump"] = code
     return ok({"page": page_name, "code": code})

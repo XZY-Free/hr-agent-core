@@ -23,6 +23,8 @@ def test_page_jump_sets_state():
 def test_page_jump_unknown_name():
     r = page_jump("不存在的页面", _ctx())
     assert not r["success"] and r["error_type"] == "unknown_page"
+    # 错误消息要列出可选页面，模型才能换说法自我纠正
+    assert "打卡明细" in r["message"] and "我的表单" in r["message"]
 
 
 def test_callback_appends_marker_once():
