@@ -56,3 +56,23 @@ def test_kb_search_backend_exception(monkeypatch):
     assert r["success"] is False
     assert r["error_type"] == "kb_unavailable"
     assert "暂不可用" in r["message"]
+
+
+def test_kb_search_exposes_partial_failure_without_changing_data_shape(monkeypatch):
+    from hr_agent.knowledge.backend import KnowledgeSearchResults
+
+    results = KnowledgeSearchResults(
+        [{"content": "命中", "source": "制度.md", "score": 0.4}],
+        failed_scopes=("policy",),
+    )
+    monkeypatch.setattr(
+        "hr_agent.tools.rules.kb_search.get_backend",
+        lambda: type("PartialBackend", (), {"search": lambda *a, **k: results})(),
+    )
+
+    r = kb_search("test", scope="all", tool_context=FakeContext())
+
+    assert r["success"] is True
+    assert r["data"] == list(results)
+    assert r["partial_failure"] is True
+    assert r["failed_scopes"] == ["policy"]

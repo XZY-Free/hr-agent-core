@@ -12,6 +12,30 @@
 uv run python agent.py
 ```
 
+## Viking Knowledge 官方 SDK 配置
+
+当前 Knowledge 适配层直接使用 Viking 官方公开 SDK，不再访问 veADK 私有客户端。四个 scope 的 collection 映射和 endpoint 必须由服务端环境变量注入：
+
+| 环境变量 | 必填 | 说明 |
+|---|---|---|
+| `KB_BACKEND` | 是 | 真库使用 `agentkit` |
+| `KB_COLLECTION_POLICY` | 是 | policy collection |
+| `KB_COLLECTION_HANDBOOK` | 是 | handbook collection |
+| `KB_COLLECTION_SALARY` | 是 | salary collection |
+| `KB_COLLECTION_CHILDCARE` | 是 | childcare collection |
+| `VIKING_KNOWLEDGE_HOST` | 部署时是 | Viking Knowledge endpoint，不在代码中硬编码 |
+| `VIKING_KNOWLEDGE_REGION` | 部署时是 | 资源地域 |
+| `VIKING_KNOWLEDGE_SCHEME` | 是 | 通常为 `https` |
+| `VIKING_KNOWLEDGE_PROJECT` | 按资源 | Viking project |
+| `VOLCENGINE_ACCESS_KEY` | 是 | 服务端 AK，不写入配置样例、日志或 Git |
+| `VOLCENGINE_SECRET_KEY` | 是 | 服务端 SK，不写入配置样例、日志或 Git |
+| `VOLCENGINE_SESSION_TOKEN` | 临时凭据时是 | IAM/STS 临时 token |
+| `LOGGING_LEVEL` | 是 | 使用 `INFO` 或更高等级，禁止 veADK DEBUG 输出完整工具响应 |
+
+本地开发把真实凭据写入已忽略的 `.env`，参考 `.env.example`，不得提交该文件。Runtime 部署时把 collection 与 endpoint 放入运行时环境配置；长期 AK/SK 使用 Runtime secret，IAM/STS 模式使用 AK、SK、session token 三段临时凭据。应用不会自行签名，也不会把 SDK 原始异常返回给调用方。
+
+批次 6 云端门禁前只允许准备配置清单，不得运行 `agentkit launch` 或修改 Runtime。实际 IAM/STS 角色关联、远端 Trace 和 AgentKit“知识库分析”关联将在开发 Runtime 部署获批后验证。
+
 ## 本地联调验证（两个首验证项）
 
 ```bash

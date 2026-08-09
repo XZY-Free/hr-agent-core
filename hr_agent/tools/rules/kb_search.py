@@ -1,7 +1,7 @@
 """知识库检索工具：按 scope 查询并返回结构化结果。"""
 
 from hr_agent.schemas.tool_result import ok, err
-from hr_agent.knowledge.backend import get_backend
+from hr_agent.knowledge.backend import KnowledgeBackendError, get_backend
 
 _VALID_SCOPES = {"policy", "handbook", "salary", "childcare", "all"}
 
@@ -20,7 +20,14 @@ def kb_search(query: str, scope: str, tool_context) -> dict:
     try:
         backend = get_backend()
         results = backend.search(query, scope=scope, top_k=5)
+    except KnowledgeBackendError as exc:
+        return err(exc.error_type, "知识库暂不可用，请稍后再试或转人工")
     except Exception:
         return err("kb_unavailable", "知识库暂不可用，请稍后再试或转人工")
 
-    return ok(results)
+    response = ok(list(results))
+    failed_scopes = list(getattr(results, "failed_scopes", ()))
+    if failed_scopes:
+        response["partial_failure"] = True
+        response["failed_scopes"] = failed_scopes
+    return response

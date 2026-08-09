@@ -156,8 +156,12 @@
   expect_not_keywords: ["\\n"]   # 不应把转义符原样吐出来
 
 - id: followup_present
+  # 核心门禁：必须检索知识库并答出跨年截止时间；推荐追问仅作为非阻塞质量指标。
   turns: ["年假能跨年用吗"]
-  expect_keywords: ["还想了解"]
+  expect_tool: [kb_search]
+  expect_keywords: ["跨年度"]
+  expect_any_keyword: ["3月31日", "3 月 31 日"]
+  quality_keywords: ["还想了解"]
 
 - id: policy_probation
   # 原为 policy_sick_pay（"病假工资制度"），但真库没有病假工资内容——三种问法

@@ -8,6 +8,9 @@
 import os
 from pathlib import Path
 
+# veADK 默认 DEBUG 会打印完整工具响应；评测证据另行记录脱敏后的调用轨迹。
+os.environ.setdefault("LOGGING_LEVEL", "INFO")
+
 # pytest 默认不加载 .env，需在此主动加载，否则真实 Key 在 conftest 执行时尚未入环境，
 # 下方 setdefault 会把 dummy 设进去导致评测永远 skip。
 _env_file = Path(__file__).resolve().parent.parent / ".env"

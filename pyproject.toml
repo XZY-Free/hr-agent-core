@@ -4,11 +4,12 @@ version = "0.1.0"
 description = "人力 AI 智能体（考勤请假），veADK + AgentKit"
 requires-python = ">=3.12"
 dependencies = [
-    "veadk-python==0.5.37",
-    "agentkit-sdk-python==0.5.10",
-    "google-adk==1.32.0",
+    "veadk-python==1.1.0",
+    "agentkit-sdk-python==0.8.1",
+    "google-adk==2.2.0",
     "urllib3<2.0.0",
-    "volcengine-python-sdk>=4.0.33",
+    "volcengine==1.0.226",
+    "volcengine-python-sdk==5.0.42",
     "litellm",
     "requests>=2.31",
     "pydantic>=2.7",
@@ -19,5 +20,8 @@ dependencies = [
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "responses>=0.25"]
 
 [tool.pytest.ini_options]
-markers = ["eval: 需要真实方舟模型 Key 的对话评测，默认跳过"]
+markers = [
+    "eval: 需要真实方舟模型 Key 的对话评测，默认跳过",
+    "integration: 需要真实外部资源的集成测试，默认按各用例条件跳过",
+]
 addopts = "-m 'not eval'"

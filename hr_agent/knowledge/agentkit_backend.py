@@ -1,19 +1,24 @@
-"""AgentKit Knowledge 真实检索后端：基于 veADK KnowledgeBase(backend='viking')。
+"""AgentKit/Viking 知识库适配层：使用 Viking 官方公开 SDK。
 
 collection 名从环境变量读，按 scope 定向检索：
   policy / handbook / salary / childcare 各对应一个 Viking 知识库 collection；
   all = policy + handbook + salary 合并（与 local_stub 行为一致，不含 childcare）。
 
-鉴权用火山引擎 AK/SK（VOLCENGINE_ACCESS_KEY / VOLCENGINE_SECRET_KEY），
-由 veADK 的 VikingDBKnowledgeBackend 内部 SignerV4 签名。
-- 本地未配 AK/SK 时，首次检索会抛鉴权错误。
-- 部署到 AgentKit Runtime 后，可由平台 IAM 自动注入凭证（见 _set_service_info）。
-
-参考：agentkit-samples/python/01-tutorials/06-agentkit-knowledge/viking_knowledge
-      volcengine.github.io/agentkit-sdk-python/content/7.knowledge/1.knowledge_quickstart
+鉴权由官方 SDK 使用服务端环境中的 AK/SK/STS token 完成。本模块不访问 veADK
+私有成员、不实现签名，也不把查询正文、切片正文或凭据写入 Trace。
 """
 import os
 import time
+from functools import lru_cache
+from numbers import Real
+from typing import Callable
+
+import requests
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+from volcengine.viking_knowledgebase import VikingKnowledgeBaseService
+
+from hr_agent.knowledge.backend import KnowledgeBackendError, KnowledgeSearchResults
 
 # scope → 要检索的 collection 键列表（all 聚合三库，与 local_stub._SCOPE_FILES 一致）
 _SCOPE_COLLECTIONS: dict[str, list[str]] = {
@@ -24,99 +29,205 @@ _SCOPE_COLLECTIONS: dict[str, list[str]] = {
     "all": ["policy", "handbook", "salary"],
 }
 
-# 模块级 KB 实例缓存：避免每次检索都触发 collection 存在性检查与鉴权握手
-_KB_CACHE: dict[str, object] = {}
+_COLLECTION_ENV = {
+    "policy": "KB_COLLECTION_POLICY",
+    "handbook": "KB_COLLECTION_HANDBOOK",
+    "salary": "KB_COLLECTION_SALARY",
+    "childcare": "KB_COLLECTION_CHILDCARE",
+}
 
 
-def _get_kb(collection: str):
-    """懒加载 VikingDB KnowledgeBase 实例。
-
-    首次调用触发 VikingDB 鉴权与 collection 存在性检查（需 AK/SK）。
-    测试中通过 monkeypatch 本函数绕过网络。
-    """
-    from veadk.knowledgebase import KnowledgeBase
-
-    if collection not in _KB_CACHE:
-        _KB_CACHE[collection] = KnowledgeBase(backend="viking", index=collection)
-    return _KB_CACHE[collection]
+def _required_env(name: str, error_type: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise KnowledgeBackendError(error_type)
+    return value
 
 
-def _search_raw(kb, collection: str, query: str, top_k: int) -> list[dict]:
-    """绕过 veADK 的 search() 封装，直接调底层 VikingKnowledgeBaseService.search_knowledge()。
+def _collections_from_env() -> dict[str, str]:
+    return {
+        scope: _required_env(env_name, "knowledge_configuration_error")
+        for scope, env_name in _COLLECTION_ENV.items()
+    }
 
-    原因：veADK 的 KnowledgeBase.search() 把原始响应里的 score 和 doc_info.doc_name 丢了，
-    只留 content。咨询 Agent 回答需要"引用哪份制度文档"，故取原始 result_list 自行解析。
 
-    复用 veADK 已构造好的 _backend._viking_sdk_client（含 AK/SK 鉴权、host 解析），
-    不自己拼签名。client 在 _search_knowledge 内部第一次成功调用前赋值（619 行），
-    故先跑一次真实查询触发其构造，再直接用 client 拿原始响应。
-    """
-    backend = kb._backend
-    if backend._viking_sdk_client is None:
-        # 用真实 query 触发 client 构造（空 query 会被 VikingDB 参数校验拒绝）
-        backend._search_knowledge(query=query, top_k=top_k)
-    client = backend._viking_sdk_client
+@lru_cache(maxsize=1)
+def _official_viking_client() -> VikingKnowledgeBaseService:
+    kwargs = {
+        "ak": _required_env(
+            "VOLCENGINE_ACCESS_KEY", "knowledge_authentication_failed"
+        ),
+        "sk": _required_env(
+            "VOLCENGINE_SECRET_KEY", "knowledge_authentication_failed"
+        ),
+    }
+    optional_env = {
+        "host": "VIKING_KNOWLEDGE_HOST",
+        "region": "VIKING_KNOWLEDGE_REGION",
+        "scheme": "VIKING_KNOWLEDGE_SCHEME",
+        "sts_token": "VOLCENGINE_SESSION_TOKEN",
+    }
+    for argument, env_name in optional_env.items():
+        value = os.getenv(env_name, "").strip()
+        if value:
+            kwargs[argument] = value
+    try:
+        return VikingKnowledgeBaseService(**kwargs)
+    except Exception as exc:
+        raise _safe_error(exc) from None
 
-    # VikingDB 免费档有 QPS 限制，瞬时限流时等 1.2s 重试一次
-    for attempt in range(2):
-        try:
-            response = client.search_knowledge(
-                collection_name=collection,
-                project=backend.volcengine_project,
-                query=query,
-                limit=top_k,
-                post_processing={"rerank_swich": True, "chunk_diffusion_count": 0},
-            )
-            break
-        except Exception as e:
-            if attempt == 0 and "QPS" in str(e):
-                time.sleep(1.2)
-                continue
-            raise
+
+def _is_qps_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "qps" in text or "rate limit" in text or "too many requests" in text
+
+
+def _safe_error(exc: Exception) -> KnowledgeBackendError:
+    if isinstance(exc, (ConnectionError, TimeoutError, requests.RequestException)):
+        return KnowledgeBackendError("knowledge_network_error")
+    text = str(exc).lower()
+    if any(marker in text for marker in (
+        "signature", "unauthorized", "forbidden", "access denied",
+        "accessdenied", "invalidaccess", "credential",
+    )):
+        return KnowledgeBackendError("knowledge_authentication_failed")
+    if _is_qps_error(exc):
+        return KnowledgeBackendError("knowledge_rate_limited")
+    return KnowledgeBackendError("knowledge_service_error")
+
+
+def _map_response(response) -> list[dict]:
+    if not isinstance(response, dict) or "result_list" not in response:
+        raise KnowledgeBackendError("knowledge_invalid_response")
+    rows = response["result_list"]
+    if rows is None:
+        return []
+    if not isinstance(rows, list):
+        raise KnowledgeBackendError("knowledge_invalid_response")
 
     results = []
-    for r in response.get("result_list", []) or []:
-        doc_info = r.get("doc_info", {}) or {}
+    for row in rows:
+        if (
+            not isinstance(row, dict)
+            or not isinstance(row.get("content"), str)
+            or "score" not in row
+            or not isinstance(row.get("doc_info"), dict)
+        ):
+            raise KnowledgeBackendError("knowledge_invalid_response")
+        source = row["doc_info"].get("doc_name")
+        if not isinstance(source, str) or not source.strip():
+            raise KnowledgeBackendError("knowledge_source_missing")
+        score = row["score"]
+        if isinstance(score, bool) or not isinstance(score, Real):
+            raise KnowledgeBackendError("knowledge_invalid_response")
         results.append({
-            "content": r.get("content", "") or "",
-            "source": doc_info.get("doc_name") or collection,
-            "score": float(r.get("score", 0.0) or 0.0),
+            "content": row["content"],
+            "source": source,
+            "score": float(score),
         })
     return results
 
 
 class AgentKitKnowledgeBackend:
-    """AgentKit 知识库检索后端（veADK VikingDB）。
+    """AgentKit/Viking 资源的官方 SDK 检索适配层。
 
-    collection_map 可显式传入（测试用），否则从环境变量
-    KB_COLLECTION_POLICY/HANDBOOK/SALARY/CHILDCARE 读取，缺省回退到 scope 名本身。
+    collection_map 和 client 可显式注入用于单元测试；生产环境从服务端环境变量
+    读取 collection 和凭据。
     """
 
-    def __init__(self, collection_map: dict[str, str] | None = None):
-        if collection_map is None:
-            collection_map = {
-                "policy": os.getenv("KB_COLLECTION_POLICY", "policy"),
-                "handbook": os.getenv("KB_COLLECTION_HANDBOOK", "handbook"),
-                "salary": os.getenv("KB_COLLECTION_SALARY", "salary"),
-                "childcare": os.getenv("KB_COLLECTION_CHILDCARE", "childcare"),
-            }
-        self.collection_map = collection_map
+    def __init__(
+        self,
+        collection_map: dict[str, str] | None = None,
+        *,
+        client=None,
+        project: str | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        tracer=None,
+    ):
+        self.collection_map = collection_map or _collections_from_env()
+        if any(not self.collection_map.get(scope) for scope in _COLLECTION_ENV):
+            raise KnowledgeBackendError("knowledge_configuration_error")
+        self.client = client or _official_viking_client()
+        self.project = project or os.getenv("VIKING_KNOWLEDGE_PROJECT") or None
+        self.sleep = sleep
+        self.tracer = tracer or trace.get_tracer(__name__)
 
-    def search(self, query: str, scope: str, top_k: int = 5) -> list[dict]:
+    def _search_collection(
+        self, collection: str, query: str, top_k: int
+    ) -> list[dict]:
+        kwargs = {
+            "collection_name": collection,
+            "query": query,
+            "limit": top_k,
+            "post_processing": {
+                "rerank_swich": True,
+                "chunk_diffusion_count": 0,
+            },
+        }
+        if self.project:
+            kwargs["project"] = self.project
+
+        for attempt in range(2):
+            try:
+                return _map_response(self.client.search_knowledge(**kwargs))
+            except KnowledgeBackendError:
+                raise
+            except Exception as exc:
+                if attempt == 0 and _is_qps_error(exc):
+                    self.sleep(1.2)
+                    continue
+                raise _safe_error(exc) from None
+        raise KnowledgeBackendError("knowledge_rate_limited")
+
+    def search(
+        self, query: str, scope: str, top_k: int = 5
+    ) -> KnowledgeSearchResults:
         """按 scope 检索知识库，返回 [{"content", "source", "score"}]。
 
         单库失败不阻断其他库（all 模式下个别库不可用仍返回其余结果）；
         整体失败由上层 kb_search 工具兜底为 kb_unavailable。
         """
         if scope not in _SCOPE_COLLECTIONS:
-            return []
+            raise KnowledgeBackendError("knowledge_invalid_scope")
 
-        results: list[dict] = []
-        for key in _SCOPE_COLLECTIONS[scope]:
-            collection = self.collection_map.get(key, key)
-            try:
-                kb = _get_kb(collection)
-                results.extend(_search_raw(kb, collection, query, top_k))
-            except Exception:
-                continue
-        return results
+        scope_keys = _SCOPE_COLLECTIONS[scope]
+        collections = [self.collection_map[key] for key in scope_keys]
+        started = time.perf_counter()
+        with self.tracer.start_as_current_span(
+            "knowledge.search",
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
+            span.set_attribute("knowledge.scope", scope)
+            span.set_attribute("knowledge.collection", ",".join(collections))
+            span.set_attribute("knowledge.top_k", top_k)
+            results: list[dict] = []
+            failures: list[tuple[str, KnowledgeBackendError]] = []
+            for scope_key, collection in zip(scope_keys, collections, strict=True):
+                try:
+                    results.extend(self._search_collection(collection, query, top_k))
+                except KnowledgeBackendError as exc:
+                    failures.append((scope_key, exc))
+
+            if failures and (scope != "all" or len(failures) == len(scope_keys)):
+                error = failures[0][1]
+                span.set_attribute("knowledge.result_count", 0)
+                span.set_attribute("knowledge.partial_failure", False)
+                span.set_attribute("knowledge.error_type", error.error_type)
+                span.set_attribute(
+                    "knowledge.elapsed_ms", (time.perf_counter() - started) * 1000
+                )
+                span.set_status(Status(StatusCode.ERROR))
+                raise error
+
+            failed_scopes = tuple(key for key, _ in failures)
+            span.set_attribute("knowledge.result_count", len(results))
+            span.set_attribute("knowledge.partial_failure", bool(failed_scopes))
+            span.set_attribute(
+                "knowledge.error_type",
+                failures[0][1].error_type if failures else "none",
+            )
+            span.set_attribute(
+                "knowledge.elapsed_ms", (time.perf_counter() - started) * 1000
+            )
+            return KnowledgeSearchResults(results, failed_scopes=failed_scopes)

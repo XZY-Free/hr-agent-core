@@ -190,6 +190,42 @@ def _collect_event_data(events):
     return trace["tool_calls"], trace["text"]
 
 
+def _redact_tool_response(name: str, response):
+    """Knowledge 轨迹只保留来源和分数，不落盘切片正文。"""
+    if name != "kb_search" or not isinstance(response, dict):
+        return response
+
+    redacted = {
+        key: response[key]
+        for key in ("success", "error_type", "partial_failure", "failed_scopes")
+        if key in response
+    }
+    rows = response.get("data")
+    if isinstance(rows, list):
+        redacted["result_count"] = len(rows)
+        redacted["results"] = [
+            {
+                key: row[key]
+                for key in ("source", "score")
+                if isinstance(row, dict) and key in row
+            }
+            for row in rows
+        ]
+    return redacted
+
+
+def _evaluate_quality_metrics(case: dict, final_text: str, dialog_text: str) -> list[dict]:
+    """计算非阻塞表达质量指标，不参与核心业务断言。"""
+    return [
+        {
+            "name": "recommended_followup",
+            "keyword": keyword,
+            "hit": keyword in final_text,
+        }
+        for keyword in case.get("quality_keywords", [])
+    ]
+
+
 def _collect_turn(events) -> dict:
     """把一轮事件流拆成可读轨迹：工具调用（名/参数/返回）、思考量、输出文本。
 
@@ -212,7 +248,7 @@ def _collect_turn(events) -> dict:
             fr = getattr(p, "function_response", None)
             if fr is not None and getattr(fr, "name", None):
                 steps.append({"kind": "result", "author": author, "name": fr.name,
-                              "response": fr.response})
+                              "response": _redact_tool_response(fr.name, fr.response)})
                 continue
             txt = getattr(p, "text", None)
             if txt is None or not txt.strip():
@@ -229,7 +265,7 @@ def _collect_turn(events) -> dict:
 
 # ---------- 执行轨迹日志 ----------
 # 评测跑批的失败分两类：模型行为不符期望（断言失败）与基础设施故障（连接错误）。
-# 两者在 pytest 输出里混在一起，且全量跑 22 条要 12 分钟、看不到中间过程，无法
+# 两者在 pytest 输出里混在一起，且全量跑 21 条耗时较长、看不到中间过程，无法
 # 判断"某条为何失败"。故逐 case 落盘完整轨迹：工具调用+参数+返回、思考量、
 # 每轮耗时、相对跑批开始的时间偏移（用于判断故障是否与累积运行时长相关）。
 EVAL_LOG_DIR = Path(__file__).parent / "logs"
@@ -283,6 +319,14 @@ def _format_trace(rec: dict) -> str:
                 lines.append(f"     ✎ [{who}] {_fmt(s['text'], 600)}")
     if rec["error"]:
         lines.append(f"\n  ✗ 异常：{rec['error']}")
+    if rec.get("core_outcome"):
+        lines.append(f"\n  核心业务评测：{rec['core_outcome']}")
+    for metric in rec.get("quality_metrics", []):
+        status = "命中" if metric["hit"] else "未命中"
+        lines.append(
+            f"  非阻塞质量指标：{metric['name']}={status}"
+            f"（关键词：{metric['keyword']}）"
+        )
     return "\n".join(lines)
 
 
@@ -295,7 +339,7 @@ def _write_trace(path: Path, rec: dict) -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", CASES, ids=[c["id"] for c in CASES])
 async def test_eval_case(case, stub_gaia, stub_requests, trace):
-    """逐 case 跑多轮对话，断言 expect_tool / expect_no_tool / expect_keywords / expect_not_keywords / expect_marker。
+    """逐 case 跑多轮对话；核心断言失败，质量指标只记录。
 
     执行轨迹落盘到 tests/eval/logs/，用于区分"模型行为不符期望"与"基础设施故障"。
     """
@@ -334,6 +378,7 @@ async def test_eval_case(case, stub_gaia, stub_requests, trace):
             trace["turns"].append({"index": i, "user": user_msg,
                                    "elapsed": time.monotonic() - started,
                                    "trace": _collect_turn(events)})
+            trace["core_outcome"] = f"异常：{type(e).__name__}"
             trace["outcome"] = f"异常中断于第 {i + 1} 轮"
             raise
         turn_trace = _collect_turn(events)
@@ -345,15 +390,27 @@ async def test_eval_case(case, stub_gaia, stub_requests, trace):
             final_text = turn_trace["text"]
             all_texts.append(turn_trace["text"])
 
+    dialog_text = "\n".join(all_texts)
+    trace["quality_metrics"] = _evaluate_quality_metrics(
+        case, final_text, dialog_text
+    )
+    for metric in trace["quality_metrics"]:
+        status = "命中" if metric["hit"] else "未命中"
+        print(
+            f"[quality] case={case['id']} metric={metric['name']} "
+            f"status={status}"
+        )
     trace["outcome"] = f"跑完 {len(case['turns'])} 轮，工具={tool_calls}"
 
     # ---------- 断言期望 ----------
     # 包一层：断言失败的具体原因要写进轨迹日志，否则事后只能看到 pytest 的截断输出
     try:
-        _assert_case(case, tool_calls, final_text, "\n".join(all_texts))
+        _assert_case(case, tool_calls, final_text, dialog_text)
     except AssertionError as e:
+        trace["core_outcome"] = f"失败：{e}"
         trace["outcome"] = f"断言失败 —— {e}"
         raise
+    trace["core_outcome"] = "通过"
     trace["outcome"] = f"通过（工具={tool_calls}）"
 
 
