@@ -8,12 +8,12 @@
 > **进展**：方舟 Key 已配 `.env`，22 条评测已跑通（**20/22 稳定通过**，剩余 2 条为模型随机性的同义表达/行为波动，已用 `expect_any_keyword`/放宽断言容纳）。首轮暴露并修复 6 个 bug（详见 architecture-overview §九）：conftest 未加载 .env、评测脚本未建 session、未过滤 thinking part、跳转回调 `state.pop` 在 ADK State 上 AttributeError、今天日期未注入 prompt、stub 排班未按日期范围过滤。另有 kb_search 单测依赖全局后端配置，已改显式挂桩。
 
 ## B. 知识库（拿到火山 AK/SK + 确认库名后）
-> 真检索代码已实现（`hr_agent/knowledge/agentkit_backend.py`，82 单测含 3 条覆盖），只差凭证与库名。
+> 真检索代码已实现（`apps/consult_agent/knowledge/agentkit_backend.py`，82 单测含 3 条覆盖），只差凭证与库名。
 
 1. 确认 4 个库已在 AgentKit 建好（制度/操作手册/薪酬福利/地区育儿假），职级对照表已随薪酬库导入
 2. 确认 4 个库的 **collection 名**（控制台知识库详情页；若建库时直接用了 `policy`/`handbook`/`salary`/`childcare`，则代码缺省值已匹配，无需配 `KB_COLLECTION_*`）
 3. `.env`：`KB_BACKEND=agentkit` + `VOLCENGINE_ACCESS_KEY` / `VOLCENGINE_SECRET_KEY`（火山引擎 AK/SK，获取：console.volcengine.com/iam/keymanager）
-4. 连通性冒烟：`uv run python -c "from hr_agent.knowledge.agentkit_backend import AgentKitKnowledgeBackend as B; print(B().search('迟到扣款','policy',3))"` 应返回真库内容
+4. 连通性冒烟：`uv run python -c "from apps.consult_agent.knowledge.agentkit_backend import AgentKitKnowledgeBackend as B; print(B().search('迟到扣款','policy',3))"` 应返回真库内容
 5. 重跑评测 A.2；对比 stub 期答案质量，检索差的在 AgentKit 控制台调分段/参数
 
 ### B.6 已知的内容缺口与检索质量问题（2026-07-30 逐条审执行轨迹后发现）
@@ -53,9 +53,9 @@
 ## D. 部署 —— ✅ 已上线（2026-07-30）
 1. ~~本地 client 验证 state 传参与 [[JUMP]] 透传~~ ✅（顺带修了查询工具失败时假转人工的降级缺陷）
 2. ~~agentkit config / launch~~ ✅ 已部署到 AgentKit Runtime，
-   endpoint 与云资源清单见 deploy/README.md（**资源在计费，不用时 `agentkit destroy`**）
+   endpoint 与云资源清单见 deployment/README.md（**资源在计费，不用时 `agentkit destroy`**）
 3. ~~线上重验~~ ✅ state 传参 / 查询降级 / JUMP 透传 / 真 Viking 库检索均通过
-4. 后续：改代码后 `uv run agentkit launch` 重部署（endpoint 不变），详见 deploy/README.md
+4. 后续：改代码后 `uv run agentkit launch` 重部署（endpoint 不变），详见 deployment/README.md
 
 ## E. 响应延迟 —— ✅ 已实测定论：关闭 thinking
 
@@ -82,7 +82,7 @@
 
 ### E.2 对照实验结论：全部关闭 thinking
 
-`THINKING_DEFAULT=disabled`（见 `hr_agent/agents/model_config.py`，也可按 agent
+`THINKING_DEFAULT=disabled`（见 `apps/orchestrator/deployment/model_config.py`，也可按 agent
 用 `THINKING_ROOT/LEAVE/CONSULT` 单独覆盖）：
 
 | 组 | thinking | 通过 | 全量耗时 |

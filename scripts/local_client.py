@@ -8,7 +8,7 @@
   ② SSE 最终文本含完整 `[[JUMP:punch-details]]`
 
 若 Runtime 不支持建会话传 state，改用备选方案：在 AgentkitAgentServerApp 前加 FastAPI 中间件，
-从请求头 X-Biz-Vars 解析变量写入 session state（详见 deploy/README.md）。
+从请求头 X-Biz-Vars 解析变量写入 session state（详见 deployment/README.md）。
 """
 import argparse
 import json
@@ -93,7 +93,7 @@ def verify(base_url: str, biz_vars: dict[str, Any],
     except Exception as e:
         print(f"     会话创建失败：{e}", file=sys.stderr)
         print(
-            "     若 Runtime 不支持建会话传 state，参见 deploy/README.md 的备选方案。",
+            "     若 Runtime 不支持建会话传 state，参见 deployment/README.md 的备选方案。",
             file=sys.stderr,
         )
         return 1

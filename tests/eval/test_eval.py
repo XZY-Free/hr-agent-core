@@ -3,7 +3,7 @@
 需要真实方舟模型 Key（.env 配置 MODEL_AGENT_API_KEY）。无 Key 时整体 skip，
 标注"待 Key 试跑"——不伪造评测通过。
 
-挂桩策略：monkeypatch hr_agent.tools.gaia.client.GaiaClient.request，
+挂桩策略：monkeypatch packages.hr_domain.gaia.client.GaiaClient.request，
 按 path 分派固定响应（员工 sex=F、排班 7-27 OFF、年假余额 remain=4 等）。
 """
 import json
@@ -16,8 +16,8 @@ import pytest
 import yaml
 from google.genai import types
 
-from hr_agent.agents.main_agent import root_agent
-from hr_agent.tools.gaia import client as gaia_client_module
+from agent import root_agent
+from packages.hr_domain.gaia import client as gaia_client_module
 
 DUMMY_KEY = "dummy-for-struct-test-only"
 
@@ -162,7 +162,7 @@ class _FakeResp:
 @pytest.fixture
 def stub_requests(monkeypatch):
     """挂桩文档下载，避免评测时真实请求外部 URL。"""
-    import hr_agent.tools.rules.parse_document as pd_mod
+    import apps.consult_agent.tools.parse_document as pd_mod
 
     monkeypatch.setattr(pd_mod.requests, "get", lambda *args, **kwargs: _FakeResp())
 

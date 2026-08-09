@@ -87,7 +87,7 @@ AgentKit Runtime：
 - 长期 AK/SK 只能作为 Runtime secret 注入；采用 IAM/STS 时同时注入三段临时凭据并定期轮换。
 - 批次 6 前不创建、不更新 Runtime；Runtime IAM/STS 的实际关联方式仍需在云端部署门禁后验证。
 
-详细变量清单见 `.env.example` 和 `deploy/README.md`。
+详细变量清单见 `.env.example` 和 `deployment/README.md`。
 
 ## 6. 可观测性差异
 
@@ -135,8 +135,8 @@ knowledge.elapsed_ms
 
 | 验证 | 结果 | 证据 |
 |---|---|---|
-| Knowledge 特征与错误测试 | 24 passed | `tests/test_knowledge_backend.py` |
-| 评测分类与日志脱敏测试 | 4 passed | `tests/test_eval_log_redaction.py` |
+| Knowledge 特征与错误测试 | 24 passed | `tests/unit/test_knowledge_backend.py` |
+| 评测分类与日志脱敏测试 | 4 passed | `tests/unit/test_eval_log_redaction.py` |
 | 全部非评测测试（最终门禁） | 110 passed，5 skipped，21 deselected | 本批本地测试输出 |
 | 真实 Viking Knowledge | 5 passed | `tests/integration/test_viking_knowledge.py` |
 | 21 条真实模型核心业务评测 | 21 passed，115 deselected | `tests/eval/logs/eval-20260809-160442.log` |

@@ -1,0 +1,3 @@
+# Orchestrator部署边界
+
+当前仅保存单Runtime共用的模型与thinking环境装配。独立Runtime配置、A2A客户端和云端资源不在批次2创建。

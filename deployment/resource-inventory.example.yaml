@@ -1,0 +1,18 @@
+version: 1
+environment: dev
+region: <volcengine-region>
+
+existing_resources: []
+planned_resources: []
+
+billing:
+  continuous_resources: []
+  scale_to_zero_resources: []
+
+credentials:
+  runtime_secrets: []
+  iam_roles: []
+
+notes:
+  - 批次2不创建或更新云资源
+  - 真实资源名、API Key、AK/SK和JWT不得写入此文件

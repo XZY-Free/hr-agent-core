@@ -4,7 +4,7 @@ from numbers import Real
 
 import pytest
 
-from hr_agent.knowledge.agentkit_backend import AgentKitKnowledgeBackend
+from apps.consult_agent.knowledge.agentkit_backend import AgentKitKnowledgeBackend
 
 
 RUN_REAL = os.getenv("RUN_REAL_KNOWLEDGE_TESTS") == "true"
