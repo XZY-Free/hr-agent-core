@@ -1,0 +1,71 @@
+- id: consult_transfer
+  message: 迟到扣款制度是什么样的
+  status: succeeded
+  tool: kb_search
+  scope: policy
+  keywords: [扣]
+
+- id: policy_late_fine
+  message: 迟到会被罚钱吗
+  status: succeeded
+  tool: kb_search
+  scope: policy
+  keywords: [扣工资]
+  any_keywords: [分钟, 元]
+
+- id: non_hr_rejected
+  message: 我电脑坏了怎么报修
+  status: rejected
+  forbidden_tool: kb_search
+  error_code: out_of_scope
+
+- id: childcare_sichuan
+  message: 四川的育儿假有几天
+  status: succeeded
+  tool: kb_search
+  scope: childcare
+  any_keywords: [10天, 10 天, 十天]
+
+- id: childcare_asks_province
+  message: 育儿假有几天
+  status: need_more_information
+  forbidden_tool: kb_search
+  any_keywords: [省, 地区, 哪个, 所在]
+
+- id: salary_term_alias
+  message: 餐补的标准在哪看
+  status: succeeded
+  tool: kb_search
+  scope: salary
+  forbidden_keywords: [敬请期待]
+
+- id: kb_empty_honest
+  message: 公司对宠物入职有什么规定
+  status_any: [not_found, rejected]
+  any_keywords: [没有查到, 未查到, 没有找到, 暂时没有, 不属于]
+
+- id: doc_qa
+  message: http://127.0.0.1:8102/notice.md 这份文件说了什么
+  status: succeeded
+  tool: parse_document
+  forbidden_tool: kb_search
+  keywords: [值班]
+  any_keywords: [春节, 放假, 假期]
+
+- id: followup_present
+  message: 年假能跨年用吗
+  status: succeeded
+  tool: kb_search
+  scope: policy
+  keywords: [跨年度]
+  any_keywords: [3月31日, 3 月 31 日]
+  quality_keywords: [还想了解]
+
+- id: policy_probation
+  message: 试用期转正的审批流程是什么
+  status: succeeded
+  tool: kb_search
+  scope: policy
+  keywords: [转正]
+  any_keywords: [HRBP, 推送, 发起, 审批]
+  forbidden_keywords: [敬请期待]

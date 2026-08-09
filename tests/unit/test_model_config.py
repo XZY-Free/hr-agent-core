@@ -1,7 +1,7 @@
 """model_config：按 agent 配置模型与 thinking 档位。"""
 import pytest
 
-from apps.orchestrator.deployment.model_config import (
+from packages.agent_runtime.model_config import (
     DEFAULT_MODEL_NAME,
     extra_config_for,
     model_for,

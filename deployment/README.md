@@ -1,5 +1,21 @@
 # 部署与联调说明
 
+## 独立Consult本地A2A服务
+
+当前可在本地启动`hr-consult-agent`，但根Orchestrator仍走本地子Agent，尚未接入A2A消费者：
+
+```bash
+KB_COLLECTION_POLICY=policy \
+KB_COLLECTION_HANDBOOK=handbook \
+KB_COLLECTION_SALARY=salary \
+KB_COLLECTION_CHILDCARE=childcare \
+uv run python -m apps.consult_agent
+```
+
+服务固定监听`127.0.0.1:8101`。健康检查、AgentCard和JSON-RPC地址分别为`/health`、`/.well-known/agent-card.json`和`/`。模型、Viking和日志变量沿用下方配置；独立服务不需要任何Gaia或员工身份变量。
+
+[`resource-inventory.example.yaml`](resource-inventory.example.yaml)只登记未来开发环境的`hr-consult-agent-dev`、`hr-consult-agent`和`hr-agents-dev`，三项均未创建。规格、实例数、持续计费、IAM和销毁方式将在批次6云端写操作暂停点提交审核。
+
 ## 本地起服务
 
 ```bash

@@ -82,7 +82,7 @@
 
 ### E.2 对照实验结论：全部关闭 thinking
 
-`THINKING_DEFAULT=disabled`（见 `apps/orchestrator/deployment/model_config.py`，也可按 agent
+`THINKING_DEFAULT=disabled`（见 `packages/agent_runtime/model_config.py`，也可按 agent
 用 `THINKING_ROOT/LEAVE/CONSULT` 单独覆盖）：
 
 | 组 | thinking | 通过 | 全量耗时 |

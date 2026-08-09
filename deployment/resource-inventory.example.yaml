@@ -1,9 +1,21 @@
 version: 1
 environment: dev
-region: <volcengine-region>
+region: cn-beijing
 
 existing_resources: []
-planned_resources: []
+planned_resources:
+  - type: Runtime
+    name: hr-consult-agent-dev
+    status: planned
+    created: false
+  - type: A2A Agent
+    name: hr-consult-agent
+    status: planned
+    created: false
+  - type: A2A Space
+    name: hr-agents-dev
+    status: planned
+    created: false
 
 billing:
   continuous_resources: []
@@ -14,5 +26,6 @@ credentials:
   iam_roles: []
 
 notes:
-  - 批次2不创建或更新云资源
+  - 批次3只登记后续开发环境资源，不创建或更新云资源
+  - 规格、最小/最大实例数和计费方式在批次6云端写操作暂停点确认
   - 真实资源名、API Key、AK/SK和JWT不得写入此文件

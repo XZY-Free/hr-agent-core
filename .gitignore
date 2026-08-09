@@ -5,6 +5,7 @@ __pycache__/
 .pytest_cache/
 .omc/
 tests/eval/logs/
+tests/e2e/logs/
 agentkit.yaml
 requirements.txt
 Dockerfile

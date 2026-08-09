@@ -8,8 +8,8 @@ from veadk.memory.short_term_memory import ShortTermMemory
 from apps.consult_agent.agent import build_consult_agent
 from apps.employee_data_agent.agent import build_employee_data_tools
 from apps.orchestrator.agent import build_orchestrator
-from apps.orchestrator.deployment.model_config import extra_config_for, model_for
 from apps.orchestrator.local_leave.agent import build_leave_agent
+from packages.agent_runtime.model_config import extra_config_for, model_for
 
 employee_data_tools = build_employee_data_tools()
 leave_agent = build_leave_agent(
@@ -19,7 +19,6 @@ leave_agent = build_leave_agent(
 consult_agent = build_consult_agent(
     model_name=model_for("consult"),
     model_extra_config=extra_config_for("consult"),
-    employee_data_tools=employee_data_tools,
 )
 root_agent = build_orchestrator(
     model_name=model_for("root"),

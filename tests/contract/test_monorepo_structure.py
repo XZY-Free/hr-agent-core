@@ -127,7 +127,7 @@ def test_root_compatibility_entry_assembles_single_runtime_agents():
     compatibility = importlib.import_module("agent")
     assert compatibility.root_agent.name == "root_agent"
     assert compatibility.leave_agent.name == "leave_agent"
-    assert compatibility.consult_agent.name == "consult_agent"
+    assert compatibility.consult_agent.name == "hr_consult_agent"
     assert compatibility.employee_data_tools
     assert any(agent is compatibility.leave_agent for agent in compatibility.root_agent.sub_agents)
     assert any(agent is compatibility.consult_agent for agent in compatibility.root_agent.sub_agents)
@@ -146,10 +146,7 @@ def test_agent_tools_and_prompt_content_are_frozen():
     assert tool_names(compatibility.leave_agent) == [
         "get_leave_permissions", "get_leave_balance", "get_schedule", "submit_leave"
     ]
-    assert tool_names(compatibility.consult_agent) == [
-        "kb_search", "parse_document", "get_leave_balance",
-        "get_medical_period", "calc_annual_leave",
-    ]
+    assert tool_names(compatibility.consult_agent) == ["kb_search", "parse_document"]
 
     prompts = {
         "apps.orchestrator.prompts": (

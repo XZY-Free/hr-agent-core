@@ -19,7 +19,7 @@ def test_root_agent_basic():
 def test_root_agent_has_two_sub_agents():
     sub_names = {getattr(a, "name", "") for a in root_agent.sub_agents}
     assert "leave_agent" in sub_names
-    assert "consult_agent" in sub_names
+    assert "hr_consult_agent" in sub_names
     # 同一对象实例（不是副本）
     assert any(a is leave_agent for a in root_agent.sub_agents)
     assert any(a is consult_agent for a in root_agent.sub_agents)
