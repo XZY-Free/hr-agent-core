@@ -24,7 +24,11 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "responses>=0.25"]
 markers = [
     "eval: 需要真实方舟模型 Key 的对话评测，默认跳过",
     "consult_eval: 独立Consult Agent真实模型与Knowledge评测",
+    "employee_data_eval: 独立Employee Data Agent真实模型与Stub评测",
     "integration: 需要真实外部资源的集成测试，默认按各用例条件跳过",
     "a2a: 通过官方A2A客户端执行的本地协议测试",
+    "employee_data_a2a: Employee Data官方A2A本地网络测试",
+    "multi_agent_a2a: 三服务本地显式A2A闭环门禁",
+    "a2a_eval: 根入口在a2a/a2a模式下的21条核心业务评测",
 ]
 addopts = "-m 'not eval'"

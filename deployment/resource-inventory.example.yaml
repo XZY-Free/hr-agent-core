@@ -2,30 +2,67 @@ version: 1
 environment: dev
 region: cn-beijing
 
-existing_resources: []
+existing_resources:
+  - type: Runtime
+    name: hr-agent
+    status: existing-unchanged
+    managed_in_current_batch: false
+
 planned_resources:
+  - type: Runtime
+    name: hr-orchestrator-dev
+    status: planned
+    created: false
+    specification: pending-approval
+    min_instances: pending-approval
+    max_instances: pending-approval
+    continuous_billing: pending-approval
   - type: Runtime
     name: hr-consult-agent-dev
     status: planned
     created: false
-  - type: A2A Agent
-    name: hr-consult-agent
+    specification: pending-approval
+    min_instances: pending-approval
+    max_instances: pending-approval
+    continuous_billing: pending-approval
+  - type: Runtime
+    name: hr-employee-data-agent-dev
     status: planned
     created: false
+    specification: pending-approval
+    min_instances: pending-approval
+    max_instances: pending-approval
+    continuous_billing: pending-approval
   - type: A2A Space
     name: hr-agents-dev
     status: planned
     created: false
+    continuous_billing: pending-approval
+  - type: A2A Agent
+    name: hr-consult-agent
+    status: planned
+    created: false
+  - type: A2A Agent
+    name: hr-employee-data-agent
+    status: planned
+    created: false
 
 billing:
-  continuous_resources: []
-  scale_to_zero_resources: []
+  continuous_resources: pending-approval
+  scale_to_zero_resources: pending-approval
 
 credentials:
-  runtime_secrets: []
-  iam_roles: []
+  runtime_secrets: pending-approval
+  iam_roles: pending-approval
+  api_keys: pending-approval
+
+deployment:
+  order: pending-approval
+  rollback: pending-approval
+  destroy: pending-approval
 
 notes:
-  - 批次3只登记后续开发环境资源，不创建或更新云资源
-  - 规格、最小/最大实例数和计费方式在批次6云端写操作暂停点确认
-  - 真实资源名、API Key、AK/SK和JWT不得写入此文件
+  - 新批次4仅登记开发环境计划资源，没有执行云端写操作
+  - 现有hr-agent保持不变，不在本批创建、更新或删除
+  - 任何agentkit launch、Runtime、A2A Space或A2A Agent写操作都需新批次5明确批准
+  - 不记录真实API Key、AK/SK、JWT、client_secret或身份映射值

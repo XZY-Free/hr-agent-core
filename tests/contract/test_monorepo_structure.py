@@ -134,6 +134,23 @@ def test_root_compatibility_entry_assembles_single_runtime_agents():
     assert compatibility.agent_server_app.app is not None
 
 
+def test_a2a_mode_keeps_only_leave_and_page_jump_local():
+    from agent import build_agent_application
+
+    application = build_agent_application(
+        consult_transport="a2a",
+        employee_data_transport="a2a",
+        a2a_client=object(),
+    )
+    tool_names = [
+        getattr(tool, "__name__", getattr(tool, "name", ""))
+        for tool in application.root_agent.tools
+    ]
+    assert tool_names == ["page_jump"]
+    assert [agent.name for agent in application.root_agent.sub_agents] == ["leave_agent"]
+    assert application.remote_router is not None
+
+
 def test_agent_tools_and_prompt_content_are_frozen():
     compatibility = importlib.import_module("agent")
     tool_names = lambda value: [

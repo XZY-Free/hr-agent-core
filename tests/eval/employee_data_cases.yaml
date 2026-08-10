@@ -1,0 +1,20 @@
+- id: balance_query
+  message: 我还有几天年假？
+  query_type: leave_balance
+  tool: calc_annual_leave
+  expected_path: leave_balance.remain
+  expected_value: 4
+
+- id: annual_calc
+  message: 我的年假是怎么折算的？
+  query_type: annual_leave_calculation
+  tool: calc_annual_leave
+  expected_path: annual_leave.quota
+  expected_value: 5
+
+- id: personal_data_not_kb
+  message: 帮我看看我还有几天医疗期
+  query_type: medical_period
+  tool: get_medical_period
+  expected_path: balance
+  expected_value: 21

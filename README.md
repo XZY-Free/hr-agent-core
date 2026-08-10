@@ -1,49 +1,77 @@
 # HR Agent 单仓多应用工程
 
-本仓库采用单仓多应用结构，让Orchestrator、制度咨询、员工本人数据和本地请假能力拥有明确代码归属，并为后续独立构建和跨Runtime A2A调用保留边界。
-
-## 当前运行形态
-
-当前保留根单Runtime兼容入口，同时新增可独立启动的`hr-consult-agent`本地A2A服务。两条入口共用同一个`build_consult_agent()`、提示词、Knowledge适配和工具清单，不存在第二份Consult实现。
+当前仓库已经形成三个可启动本地服务，同时保留`local/local`单Runtime兼容模式。Leave Agent本轮仍在Orchestrator进程内。
 
 ```text
-agent.py
-├── build_employee_data_tools()
-├── build_consult_agent(...)
-├── build_leave_agent(...)
-└── build_orchestrator(leave_agent, consult_agent, employee_data_tools)
-    └── AgentkitAgentServerApp
-
-python -m apps.consult_agent
-└── 官方A2A JSON-RPC/SSE服务（127.0.0.1:8101）
-    └── build_consult_agent(...)
+hr-orchestrator（127.0.0.1:8000）
+├── 本地 leave_agent
+├── 本地 page_jump、取消引导和人工入口
+├── A2A → hr-consult-agent（127.0.0.1:8101）
+└── A2A → hr-employee-data-agent（127.0.0.1:8102）
 ```
 
-根Orchestrator当前仍调用本地`hr_consult_agent`，尚未改为A2A消费者；该切换属于后续批次。当前没有云端Consult Runtime、A2A空间、语义发现或独立Employee Data Agent。请假Agent仍是Orchestrator的进程内能力。
+## 应用职责
 
-## 目录职责
-
-| 路径 | 当前职责 |
+| 路径 | 职责 |
 |---|---|
-| `apps/orchestrator` | 根意图分流、页面跳转、JUMP回调、单Runtime装配接口 |
-| `apps/orchestrator/local_leave` | 本地请假Agent、槽位收集、校验与请假单生成 |
-| `apps/consult_agent` | 咨询Agent、独立A2A入口、文档解析、Knowledge工具和Viking适配 |
-| `apps/employee_data_agent` | 本人余额、医疗期和年假折算工具的应用边界；尚无独立Agent |
-| `apps/leave_agent` | 未来拆分门禁文档；没有可启动Agent |
-| `packages/hr_domain` | 稳定领域常量、Schema、规则、Gaia客户端和响应适配 |
-| `deployment` | 当前部署说明、资源清单模板和环境边界 |
+| `apps/orchestrator` | 固定意图路由、本地页面/JUMP/人工入口、Leave装配、A2A消费者 |
+| `apps/orchestrator/local_leave` | 本地请假槽位收集、校验和请假单JSON生成 |
+| `apps/consult_agent` | 制度、福利、系统操作和文档问答；独立A2A服务 |
+| `apps/employee_data_agent` | 当前员工本人余额、医疗期、工龄和年假折算；独立只读A2A服务 |
+| `apps/leave_agent` | Leave未来拆分门禁；本轮没有可启动实现 |
+| `packages/agent_runtime/a2a` | 通用请求上下文、官方SDK服务/客户端适配、Artifact辅助和敏感字段检测 |
+| `packages/hr_domain` | 与Agent框架无关的领域常量、Schema、规则、Gaia客户端和响应适配 |
 
-`packages/hr_domain`可以承载与Agent框架无关的领域资产，不得包含Agent实例、提示词、`sub_agents`装配、AgentKit入口、A2A路由、Knowledge连接配置或对`apps`的反向导入。
+共享A2A包不包含AgentCard、业务契约、路由、Knowledge、Gaia、身份映射、提示词或Agent实例。
 
-## 本地验证
+## 本地模式
+
+仅支持两个transport开关：
 
 ```bash
-uv sync
-uv run pytest -q
-uv run pytest -q -m 'eval and not consult_eval' tests/eval/test_eval.py
-uv run pytest -q -m consult_eval tests/eval/test_consult_eval.py
-uv run python agent.py
-uv run python -m apps.consult_agent
+HR_CONSULT_TRANSPORT=local|a2a
+HR_EMPLOYEE_DATA_TRANSPORT=local|a2a
 ```
 
-独立Consult的AgentCard地址为`http://127.0.0.1:8101/.well-known/agent-card.json`，JSON-RPC地址为`http://127.0.0.1:8101/`。环境变量参考[`.env.example`](.env.example)，部署与联调说明见[`deployment/README.md`](deployment/README.md)。
+默认均为`local`。三服务联调时设置为`a2a/a2a`；远端失败不会静默回退本地。
+
+启动命令：
+
+```bash
+# 终端1：Consult A2A
+uv run python -m apps.consult_agent
+
+# 终端2：Employee Data A2A
+uv run python -m apps.employee_data_agent
+
+# 终端3：Orchestrator
+HR_CONSULT_TRANSPORT=a2a \
+HR_EMPLOYEE_DATA_TRANSPORT=a2a \
+uv run python agent.py
+```
+
+独立服务的健康检查和AgentCard：
+
+| 服务 | 健康检查 | AgentCard |
+|---|---|---|
+| Consult | `http://127.0.0.1:8101/health` | `http://127.0.0.1:8101/.well-known/agent-card.json` |
+| Employee Data | `http://127.0.0.1:8102/health` | `http://127.0.0.1:8102/.well-known/agent-card.json` |
+| Orchestrator | `http://127.0.0.1:8000/health` | 不作为本批A2A提供者 |
+
+## 验证
+
+```bash
+uv sync --locked
+uv run pytest -q
+uv run pytest -q tests/eval/test_eval.py -m eval
+uv run pytest -q tests/eval/test_consult_eval.py -m consult_eval
+uv run pytest -q tests/eval/test_employee_data_eval.py -m employee_data_eval
+```
+
+真实A2A和Viking测试还需相应`RUN_REAL_*`开关及本机真实模型/Viking配置。完整命令、身份配置、安全边界和最新结果见：
+
+- [`deployment/README.md`](deployment/README.md)
+- [`docs/local-multi-agent-a2a-report.md`](docs/local-multi-agent-a2a-report.md)
+- [`.env.example`](.env.example)
+
+本批没有执行任何云端写操作；计划资源只登记在`deployment/resource-inventory.example.yaml`。
