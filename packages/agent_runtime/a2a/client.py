@@ -34,10 +34,20 @@ class A2AInvocationResult:
 
 
 class OfficialA2AClient:
-    def __init__(self, *, timeout_seconds: float = 30):
+    def __init__(
+        self,
+        *,
+        timeout_seconds: float = 30,
+        runtime_api_keys: dict[str, str] | None = None,
+    ):
         if timeout_seconds <= 0:
             raise ValueError("A2A超时必须大于0")
         self.timeout_seconds = timeout_seconds
+        self.runtime_api_keys = {
+            base_url.rstrip("/"): api_key
+            for base_url, api_key in (runtime_api_keys or {}).items()
+            if base_url.strip() and api_key.strip()
+        }
 
     async def invoke(
         self,
@@ -61,7 +71,12 @@ class OfficialA2AClient:
             parts=[Part(root=TextPart(text=request.message))],
         )
         try:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as http:
+            api_key = self.runtime_api_keys.get(base_url.rstrip("/"))
+            headers = {"Authorization": f"Bearer {api_key}"} if api_key else None
+            async with httpx.AsyncClient(
+                timeout=self.timeout_seconds,
+                headers=headers,
+            ) as http:
                 card = await A2ACardResolver(http, base_url).get_agent_card()
                 if card.name != spec.agent_name or card.version != spec.agent_version:
                     raise A2AInvocationError("a2a_contract_error")

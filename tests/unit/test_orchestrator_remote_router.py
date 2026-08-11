@@ -96,11 +96,7 @@ async def test_remote_request_has_exact_allowlist(text, target, factory):
         return A2AInvocationResult(data=data, task_state="completed")
 
     client.invoke = invoke
-    router = OrchestratorRemoteRouter(
-        consult_transport="a2a",
-        employee_data_transport="a2a",
-        client=client,
-    )
+    router = OrchestratorRemoteRouter(client=client)
 
     response = await router.route(_payload(text))
 
@@ -117,25 +113,35 @@ async def test_remote_request_has_exact_allowlist(text, target, factory):
 
 
 @pytest.mark.asyncio
-async def test_local_routes_never_call_a2a_even_when_both_switches_are_a2a():
+async def test_local_routes_never_call_a2a():
     client = FakeClient([])
-    router = OrchestratorRemoteRouter(
-        consult_transport="a2a", employee_data_transport="a2a", client=client
-    )
+    router = OrchestratorRemoteRouter(client=client)
     for text in ("明天请一天年假", "打开打卡明细", "取消昨天的请假", "转人工", "确认"):
         assert await router.route(_payload(text)) is None
     assert client.calls == []
 
 
 @pytest.mark.asyncio
-async def test_explicit_local_mode_never_calls_remote():
+async def test_consult_and_employee_data_always_use_remote_agents():
     client = FakeClient([])
-    router = OrchestratorRemoteRouter(
-        consult_transport="local", employee_data_transport="local", client=client
-    )
-    assert await router.route(_payload("迟到扣款制度是什么")) is None
-    assert await router.route(_payload("我还有几天年假")) is None
-    assert client.calls == []
+
+    async def invoke(**kwargs):
+        request = kwargs["request"]
+        factory = (
+            _consult_result
+            if kwargs["spec"].agent_name == "hr-consult-agent"
+            else _employee_result
+        )
+        client.calls.append(kwargs)
+        return A2AInvocationResult(
+            data=factory(request_id=request.request_id), task_state="completed"
+        )
+
+    client.invoke = invoke
+    router = OrchestratorRemoteRouter(client=client)
+    assert (await router.route(_payload("迟到扣款制度是什么"))).target == "hr-consult-agent"
+    assert (await router.route(_payload("我还有几天年假"))).target == "hr-employee-data-agent"
+    assert len(client.calls) == 2
 
 
 @pytest.mark.asyncio
@@ -147,12 +153,7 @@ async def test_missing_root_session_never_reaches_remote_agent():
         assert session_id == "session-a"
         return False
 
-    router = OrchestratorRemoteRouter(
-        consult_transport="a2a",
-        employee_data_transport="a2a",
-        client=client,
-        session_exists=session_exists,
-    )
+    router = OrchestratorRemoteRouter(client=client, session_exists=session_exists)
     assert await router.route(_payload("迟到扣款制度是什么")) is None
     assert client.calls == []
 
@@ -173,9 +174,7 @@ async def test_remote_failure_has_safe_target_specific_message_and_no_local_fall
     text, error_code, expected
 ):
     client = FakeClient([A2AInvocationError(error_code)])
-    router = OrchestratorRemoteRouter(
-        consult_transport="a2a", employee_data_transport="a2a", client=client
-    )
+    router = OrchestratorRemoteRouter(client=client)
     response = await router.route(_payload(text))
     assert expected in response.answer
     assert response.error_code == error_code
@@ -195,8 +194,6 @@ async def test_stopped_remote_service_never_triggers_local_fallback(
     text, consult_url, employee_url, expected
 ):
     router = OrchestratorRemoteRouter(
-        consult_transport="a2a",
-        employee_data_transport="a2a",
         consult_url=consult_url,
         employee_data_url=employee_url,
     )
@@ -225,9 +222,7 @@ async def test_invalid_or_sensitive_employee_artifact_is_never_used(patch):
         return A2AInvocationResult(data=data, task_state="completed")
 
     client.invoke = invoke
-    router = OrchestratorRemoteRouter(
-        consult_transport="a2a", employee_data_transport="a2a", client=client
-    )
+    router = OrchestratorRemoteRouter(client=client)
     response = await router.route(_payload("我还有几天年假"))
     assert response.error_code in {"a2a_contract_error", "a2a_security_error"}
     assert "99" not in response.answer
@@ -246,9 +241,7 @@ async def test_unknown_response_fields_are_compatible():
         return A2AInvocationResult(data=data, task_state="completed")
 
     client.invoke = invoke
-    router = OrchestratorRemoteRouter(
-        consult_transport="a2a", employee_data_transport="a2a", client=client
-    )
+    router = OrchestratorRemoteRouter(client=client)
     response = await router.route(_payload("迟到扣款制度是什么"))
     assert response.answer == "迟到按制度分段扣款。"
     assert response.error_code is None
@@ -269,9 +262,7 @@ async def test_document_answer_does_not_fake_knowledge_sources():
         return A2AInvocationResult(data=data, task_state="completed")
 
     client.invoke = invoke
-    router = OrchestratorRemoteRouter(
-        consult_transport="a2a", employee_data_transport="a2a", client=client
-    )
+    router = OrchestratorRemoteRouter(client=client)
     response = await router.route(_payload("https://example.com/a.docx 说了什么"))
     assert response.answer == "文档包含值班安排。"
     assert response.error_code is None
@@ -290,9 +281,7 @@ async def test_knowledge_answer_without_sources_is_rejected():
         return A2AInvocationResult(data=data, task_state="completed")
 
     client.invoke = invoke
-    router = OrchestratorRemoteRouter(
-        consult_transport="a2a", employee_data_transport="a2a", client=client
-    )
+    router = OrchestratorRemoteRouter(client=client)
     response = await router.route(_payload("迟到扣款制度是什么"))
     assert response.error_code == "a2a_contract_error"
     assert "咨询服务暂时繁忙" in response.answer
@@ -321,9 +310,7 @@ async def test_consult_not_found_and_identity_unverified_have_frozen_user_behavi
         return A2AInvocationResult(data=data, task_state="completed")
 
     client.invoke = invoke
-    router = OrchestratorRemoteRouter(
-        consult_transport="a2a", employee_data_transport="a2a", client=client
-    )
+    router = OrchestratorRemoteRouter(client=client)
     consult = await router.route(_payload("火星基地宠物报销制度"))
     employee = await router.route(_payload("我还有几天年假"))
     assert "暂未查询到可靠制度" in consult.answer
@@ -348,9 +335,7 @@ async def test_explicit_cross_employee_query_is_sent_only_for_service_side_rejec
         return A2AInvocationResult(data=data, task_state="rejected")
 
     client.invoke = invoke
-    router = OrchestratorRemoteRouter(
-        consult_transport="a2a", employee_data_transport="a2a", client=client
-    )
+    router = OrchestratorRemoteRouter(client=client)
     response = await router.route(_payload("他还有几天年假"))
     assert response.target == "hr-employee-data-agent"
     assert response.status == "rejected"

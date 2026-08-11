@@ -5,8 +5,10 @@ import pytest
 from apps.orchestrator.a2a.routing import (
     DeterministicRouteTable,
     RouteTarget,
-    transport_mode,
 )
+from apps.orchestrator.a2a.router import OrchestratorRemoteRouter
+from packages.agent_runtime.a2a.client import A2AInvocationResult
+from packages.hr_domain.documents.context import encode_document_context
 
 
 @pytest.mark.parametrize(
@@ -54,8 +56,56 @@ def test_consult_need_more_information_keeps_only_same_session_pending():
     assert table.decide("四川", user_id="user-a", session_id="session-a") != RouteTarget.CONSULT
 
 
-def test_only_local_and_a2a_transport_values_are_accepted(monkeypatch):
-    assert transport_mode("HR_CONSULT_TRANSPORT", "local") == "local"
-    assert transport_mode("HR_EMPLOYEE_DATA_TRANSPORT", "a2a") == "a2a"
-    with pytest.raises(RuntimeError, match="HR_CONSULT_TRANSPORT"):
-        transport_mode("HR_CONSULT_TRANSPORT", "remote")
+class _RecordingClient:
+    def __init__(self):
+        self.requests = []
+
+    async def invoke(self, *, base_url, request, spec):
+        self.requests.append(request)
+        return A2AInvocationResult(data={
+            "request_id": request.request_id,
+            "status": "succeeded",
+            "answer": "文档答案",
+            "question_category": "hr_document",
+            "knowledge_scope": None,
+            "sources": [],
+            "truncated": False,
+            "recommend_hr": False,
+            "agent_name": "hr-consult-agent",
+            "agent_version": "1.0.0",
+            "error_code": None,
+        }, task_state="completed")
+
+
+@pytest.mark.asyncio
+async def test_document_context_provider_passes_only_the_allowlisted_summary():
+    client = _RecordingClient()
+    expected = encode_document_context({
+        "url": "https://example.com/notice.docx",
+        "content": "春节值班安排",
+    })
+
+    async def context_summary_provider(**kwargs):
+        assert kwargs["message"].startswith("https://example.com/notice.docx")
+        return expected
+
+    router = OrchestratorRemoteRouter(
+        client=client,
+        session_exists=lambda **kwargs: _async_value(True),
+        context_summary_provider=context_summary_provider,
+    )
+    response = await router.route({
+        "user_id": "user-a",
+        "session_id": "session-a",
+        "new_message": {
+            "parts": [{"text": "https://example.com/notice.docx 这份文件说了什么"}]
+        },
+    })
+
+    assert response.status == "succeeded"
+    assert client.requests[0].context_summary == expected
+    assert "employeeId" not in client.requests[0].context_summary
+
+
+async def _async_value(value):
+    return value

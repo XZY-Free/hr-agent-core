@@ -1,5 +1,7 @@
 """hr-consult-agent公开AgentCard。"""
 
+import os
+
 from a2a.types import AgentCapabilities, AgentCard, AgentProvider, AgentSkill
 
 
@@ -24,13 +26,15 @@ def _skill(
     )
 
 
-def build_agent_card(base_url: str = LOCAL_BASE_URL) -> AgentCard:
+def build_agent_card(base_url: str | None = None) -> AgentCard:
     """构造协议0.3.0、JSON-RPC、支持SSE的非敏感AgentCard。"""
+    base_url = base_url or os.getenv("HR_CONSULT_A2A_BASE_URL", LOCAL_BASE_URL)
     return AgentCard(
         name=AGENT_NAME,
         description=(
-            "回答人力制度、政策、考勤、薪酬福利、系统操作和文档内容问题；"
-            "不查询员工本人数据，不办理请假"
+            "Answers HR policy, attendance, compensation, benefits, HR system "
+            "operation, and HR document questions. Does not access personal "
+            "employee data or process leave requests."
         ),
         version=AGENT_VERSION,
         protocol_version="0.3.0",
@@ -46,27 +50,30 @@ def build_agent_card(base_url: str = LOCAL_BASE_URL) -> AgentCard:
         skills=[
             _skill(
                 "hr-policy-consultation",
-                "人力制度咨询",
-                "回答考勤、休假、入离职和试用期等制度问题",
-                ["人力制度", "考勤", "休假", "入离职", "试用期"],
+                "HR Policy Consultation",
+                "Answers questions about attendance, leave policies, onboarding, "
+                "offboarding, and probation rules.",
+                ["hr", "policy", "attendance", "leave-policy"],
             ),
             _skill(
                 "hr-benefit-consultation",
-                "薪酬福利咨询",
-                "回答薪酬、津贴、福利及相关制度问题",
-                ["薪酬", "津贴", "福利"],
+                "HR Benefits Consultation",
+                "Answers questions about compensation, allowances, and employee "
+                "benefits.",
+                ["hr", "compensation", "benefits"],
             ),
             _skill(
                 "hr-system-operation-guide",
-                "人事系统操作指引",
-                "回答人事系统和操作手册问题",
-                ["人事系统", "操作手册", "考勤系统"],
+                "HR System Operation Guide",
+                "Provides guidance for HR system operations and handbook procedures.",
+                ["hr", "system", "operations"],
             ),
             _skill(
                 "hr-document-question-answering",
-                "人力文档问答",
-                "解析用户提供的人力文档链接并回答文档内容",
-                ["人力文档", "文档解析", "摘要"],
+                "HR Document Question Answering",
+                "Parses HR document links and answers questions based on document "
+                "content.",
+                ["hr", "document", "question-answering"],
             ),
         ],
     )

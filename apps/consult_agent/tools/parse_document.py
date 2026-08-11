@@ -1,6 +1,8 @@
 """COS 文档解析工具：下载并提取文本。"""
 
 import tempfile
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -11,6 +13,19 @@ from packages.hr_domain.schemas.tool_result import ok, err
 
 _MAX_SIZE = 20 * 1024 * 1024  # 20MB
 _MAX_TEXT_LEN = 30000
+_DOCUMENT_CONTEXT: ContextVar[dict | None] = ContextVar(
+    "consult_document_context", default=None
+)
+
+
+@contextmanager
+def bind_document_context(context: dict | None):
+    """Bind one already-sanitized document payload to the current A2A turn."""
+    token = _DOCUMENT_CONTEXT.set(context)
+    try:
+        yield
+    finally:
+        _DOCUMENT_CONTEXT.reset(token)
 
 
 def parse_document(file_url: str, tool_context) -> dict:
@@ -23,6 +38,16 @@ def parse_document(file_url: str, tool_context) -> dict:
     parsed = urlparse(file_url)
     if parsed.scheme not in ("http", "https"):
         return err("parse_failed", "文档下载或解析失败，请确认链接有效")
+
+    supplied = _DOCUMENT_CONTEXT.get()
+    if isinstance(supplied, dict) and supplied.get("url") == file_url:
+        text = supplied.get("content")
+        if not isinstance(text, str) or not text:
+            return err("parse_failed", "文档下载或解析失败，请确认链接有效")
+        truncated = len(text) > _MAX_TEXT_LEN
+        if truncated:
+            text = text[:_MAX_TEXT_LEN] + "（文档过长，已截断）"
+        return ok({"text": text, "truncated": truncated})
 
     try:
         resp = requests.get(file_url, timeout=30, stream=True)

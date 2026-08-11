@@ -123,25 +123,20 @@ def test_local_python_import_graph_has_no_cycles():
         visit(module)
 
 
-def test_root_compatibility_entry_assembles_single_runtime_agents():
+def test_root_entry_assembles_a2a_only_orchestrator():
     compatibility = importlib.import_module("agent")
     assert compatibility.root_agent.name == "root_agent"
     assert compatibility.leave_agent.name == "leave_agent"
-    assert compatibility.consult_agent.name == "hr_consult_agent"
-    assert compatibility.employee_data_tools
     assert any(agent is compatibility.leave_agent for agent in compatibility.root_agent.sub_agents)
-    assert any(agent is compatibility.consult_agent for agent in compatibility.root_agent.sub_agents)
+    assert not hasattr(compatibility, "consult_agent")
+    assert not hasattr(compatibility, "employee_data_tools")
     assert compatibility.agent_server_app.app is not None
 
 
-def test_a2a_mode_keeps_only_leave_and_page_jump_local():
+def test_orchestrator_keeps_only_leave_and_page_jump_local():
     from agent import build_agent_application
 
-    application = build_agent_application(
-        consult_transport="a2a",
-        employee_data_transport="a2a",
-        a2a_client=object(),
-    )
+    application = build_agent_application(a2a_client=object())
     tool_names = [
         getattr(tool, "__name__", getattr(tool, "name", ""))
         for tool in application.root_agent.tools
@@ -151,19 +146,34 @@ def test_a2a_mode_keeps_only_leave_and_page_jump_local():
     assert application.remote_router is not None
 
 
+def test_cloud_a2a_mode_binds_each_runtime_key_to_its_registered_url(monkeypatch):
+    from agent import build_agent_application
+
+    consult_url = "https://consult.example.invalid"
+    employee_url = "https://employee.example.invalid"
+    monkeypatch.setenv("HR_CONSULT_A2A_URL", consult_url)
+    monkeypatch.setenv("HR_EMPLOYEE_DATA_A2A_URL", employee_url)
+    monkeypatch.setenv("HR_CONSULT_RUNTIME_API_KEY", "consult-runtime-key")
+    monkeypatch.setenv("HR_EMPLOYEE_DATA_RUNTIME_API_KEY", "employee-runtime-key")
+
+    application = build_agent_application()
+
+    assert application.remote_router.client.runtime_api_keys == {
+        consult_url: "consult-runtime-key",
+        employee_url: "employee-runtime-key",
+    }
+
+
 def test_agent_tools_and_prompt_content_are_frozen():
     compatibility = importlib.import_module("agent")
     tool_names = lambda value: [
         getattr(tool, "__name__", getattr(tool, "name", ""))
         for tool in value.tools
     ]
-    assert tool_names(compatibility.root_agent) == [
-        "page_jump", "get_leave_balance", "get_medical_period", "calc_annual_leave"
-    ]
+    assert tool_names(compatibility.root_agent) == ["page_jump"]
     assert tool_names(compatibility.leave_agent) == [
         "get_leave_permissions", "get_leave_balance", "get_schedule", "submit_leave"
     ]
-    assert tool_names(compatibility.consult_agent) == ["kb_search", "parse_document"]
 
     prompts = {
         "apps.orchestrator.prompts": (

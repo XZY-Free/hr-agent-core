@@ -7,10 +7,11 @@ from pathlib import Path
 
 import tomllib
 
-from agent import consult_agent, root_agent
+from agent import root_agent
 from apps.consult_agent.a2a.card import build_agent_card
 from apps.consult_agent.agent import build_consult_agent
 from apps.consult_agent.prompts import CONSULT_AGENT_PROMPT
+from packages.agent_runtime.model_config import extra_config_for, model_for
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -37,9 +38,13 @@ def test_consult_builder_has_no_employee_data_dependency_and_only_consult_tools(
         "model_name",
         "model_extra_config",
     }
+    consult_agent = build_consult_agent(
+        model_name=model_for("consult"),
+        model_extra_config=extra_config_for("consult"),
+    )
     assert consult_agent.name == "hr_consult_agent"
     assert _tool_names(consult_agent) == ["kb_search", "parse_document"]
-    assert any(agent is consult_agent for agent in root_agent.sub_agents)
+    assert all(agent.name != "hr_consult_agent" for agent in root_agent.sub_agents)
 
 
 def test_consult_prompt_content_remains_frozen():

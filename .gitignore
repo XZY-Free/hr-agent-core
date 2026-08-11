@@ -7,6 +7,8 @@ __pycache__/
 tests/eval/logs/
 tests/e2e/logs/
 agentkit.yaml
+.runtime-secrets.json
+.stage1-cloud-state.json
 requirements.txt
 Dockerfile
 .dockerignore

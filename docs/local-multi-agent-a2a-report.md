@@ -1,5 +1,7 @@
 # 新批次4 本地多 Agent 与 A2A 报告
 
+> 最终状态修正：本文保留新批次4的迁移期事实。新批次5已在云端双轨清理前后分别取得21/21，生产Orchestrator中的local Consult、local Employee Data和transport切换已删除。当前运行手册以根`README.md`、`deployment/README.md`和`docs/cloud-deployment-report.md`为准。
+
 检查时间：2026-08-10（Asia/Shanghai）
 
 起点：`051a8e2 feat: expose consult agent as standalone a2a service`

@@ -1,6 +1,6 @@
 # HR Agent 单仓多应用工程
 
-当前仓库已经形成三个可启动本地服务，同时保留`local/local`单Runtime兼容模式。Leave Agent本轮仍在Orchestrator进程内。
+当前仓库已形成三个独立应用。生产Orchestrator固定通过A2A调用Consult与Employee Data，不再保留本地生产回退；Leave Agent仍在Orchestrator进程内。
 
 ```text
 hr-orchestrator（127.0.0.1:8000）
@@ -24,16 +24,9 @@ hr-orchestrator（127.0.0.1:8000）
 
 共享A2A包不包含AgentCard、业务契约、路由、Knowledge、Gaia、身份映射、提示词或Agent实例。
 
-## 本地模式
+## 本地联调
 
-仅支持两个transport开关：
-
-```bash
-HR_CONSULT_TRANSPORT=local|a2a
-HR_EMPLOYEE_DATA_TRANSPORT=local|a2a
-```
-
-默认均为`local`。三服务联调时设置为`a2a/a2a`；远端失败不会静默回退本地。
+Orchestrator通过`HR_CONSULT_A2A_URL`和`HR_EMPLOYEE_DATA_A2A_URL`指定两个A2A端点；本地默认为8101/8102。远端失败显式返回安全错误，不会静默回退。
 
 启动命令：
 
@@ -45,8 +38,6 @@ uv run python -m apps.consult_agent
 uv run python -m apps.employee_data_agent
 
 # 终端3：Orchestrator
-HR_CONSULT_TRANSPORT=a2a \
-HR_EMPLOYEE_DATA_TRANSPORT=a2a \
 uv run python agent.py
 ```
 
@@ -74,4 +65,13 @@ uv run pytest -q tests/eval/test_employee_data_eval.py -m employee_data_eval
 - [`docs/local-multi-agent-a2a-report.md`](docs/local-multi-agent-a2a-report.md)
 - [`.env.example`](.env.example)
 
-本批没有执行任何云端写操作；计划资源只登记在`deployment/resource-inventory.example.yaml`。
+## 云端开发验证状态
+
+三个开发Runtime、`hr-agents-dev`及两个公网Runtime来源A2A Agent已创建并保留，准确ID、版本、镜像、费用风险和当前阻塞见：
+
+- [`docs/cloud-deployment-report.md`](docs/cloud-deployment-report.md)
+- [`deployment/resource-inventory.yaml`](deployment/resource-inventory.yaml)
+
+云端双轨清理前和清理后21条核心评测均为21/21。Consult和Employee Data最终使用`e827b01-stage1-six-fixes`，Orchestrator使用`e827b01-stage1-orchestrator-a2a-only`；拆分与A2A工程已收口。
+
+分享源码时只能运行`python -m scripts.source_archive <output.zip>`从Git已跟踪文件生成归档；Runtime镜像禁止使用全目录复制。详细门禁见[`deployment/README.md`](deployment/README.md)。

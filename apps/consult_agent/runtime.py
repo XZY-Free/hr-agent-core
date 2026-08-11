@@ -16,7 +16,9 @@ from veadk import Agent, Runner
 
 from apps.consult_agent.a2a.contract import ConsultA2ARequest, ConsultA2AResult
 from apps.consult_agent.agent import build_consult_agent
+from apps.consult_agent.tools.parse_document import bind_document_context
 from packages.agent_runtime.model_config import extra_config_for, model_for
+from packages.hr_domain.documents.context import decode_document_context
 
 
 APP_NAME = "hr-consult-agent"
@@ -75,8 +77,9 @@ class VeADKConsultTurnRunner:
             user_id=request.user_id,
             session_id=request.session_id,
         )
+        document_context = decode_document_context(request.context_summary)
         text = request.message
-        if request.context_summary:
+        if request.context_summary and document_context is None:
             text = f"咨询背景摘要：{request.context_summary}\n用户问题：{text}"
         message = types.Content(role="user", parts=[types.Part(text=text)])
         texts: list[str] = []
@@ -85,42 +88,44 @@ class VeADKConsultTurnRunner:
         sources: list[dict] = []
         truncated = False
         error_code = None
-        async for event in self.runner.run_async(
-            user_id=request.user_id,
-            session_id=request.session_id,
-            new_message=message,
-        ):
-            if not event.content or not event.content.parts:
-                continue
-            for part in event.content.parts:
-                function_call = getattr(part, "function_call", None)
-                if function_call and getattr(function_call, "name", None):
-                    tool_names.append(function_call.name)
-                    if function_call.name == "kb_search":
-                        knowledge_scope = dict(function_call.args or {}).get("scope")
+        bound_document = document_context.model_dump() if document_context else None
+        with bind_document_context(bound_document):
+            async for event in self.runner.run_async(
+                user_id=request.user_id,
+                session_id=request.session_id,
+                new_message=message,
+            ):
+                if not event.content or not event.content.parts:
                     continue
-                function_response = getattr(part, "function_response", None)
-                if function_response and getattr(function_response, "name", None):
-                    response = function_response.response
-                    if isinstance(response, dict):
-                        if response.get("success") is False:
-                            error_code = response.get("error_type") or "tool_failed"
-                        data = response.get("data")
-                        if function_response.name == "kb_search" and isinstance(data, list):
-                            sources = [
-                                {"source": row["source"], "score": row["score"]}
-                                for row in data
-                                if isinstance(row, dict)
-                                and isinstance(row.get("source"), str)
-                                and isinstance(row.get("score"), (int, float))
-                                and not isinstance(row.get("score"), bool)
-                            ]
-                        if function_response.name == "parse_document" and isinstance(data, dict):
-                            truncated = bool(data.get("truncated"))
-                    continue
-                value = getattr(part, "text", None)
-                if value and value.strip() and not getattr(part, "thought", False):
-                    texts.append(value.strip())
+                for part in event.content.parts:
+                    function_call = getattr(part, "function_call", None)
+                    if function_call and getattr(function_call, "name", None):
+                        tool_names.append(function_call.name)
+                        if function_call.name == "kb_search":
+                            knowledge_scope = dict(function_call.args or {}).get("scope")
+                        continue
+                    function_response = getattr(part, "function_response", None)
+                    if function_response and getattr(function_response, "name", None):
+                        response = function_response.response
+                        if isinstance(response, dict):
+                            if response.get("success") is False:
+                                error_code = response.get("error_type") or "tool_failed"
+                            data = response.get("data")
+                            if function_response.name == "kb_search" and isinstance(data, list):
+                                sources = [
+                                    {"source": row["source"], "score": row["score"]}
+                                    for row in data
+                                    if isinstance(row, dict)
+                                    and isinstance(row.get("source"), str)
+                                    and isinstance(row.get("score"), (int, float))
+                                    and not isinstance(row.get("score"), bool)
+                                ]
+                            if function_response.name == "parse_document" and isinstance(data, dict):
+                                truncated = bool(data.get("truncated"))
+                        continue
+                    value = getattr(part, "text", None)
+                    if value and value.strip() and not getattr(part, "thought", False):
+                        texts.append(value.strip())
         answer = "\n".join(texts).strip()
         if not answer:
             answer = "咨询服务暂时无法生成回答。"

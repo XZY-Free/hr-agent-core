@@ -2,7 +2,7 @@
 
 不调用真实模型，仅做结构断言（与 leave_agent 测试同构）。
 """
-from agent import consult_agent, leave_agent, root_agent
+from agent import leave_agent, root_agent
 from apps.orchestrator.callbacks.jump_marker import jump_marker_callback
 
 
@@ -16,19 +16,15 @@ def test_root_agent_basic():
     assert root_agent.instruction and "人力" in root_agent.instruction
 
 
-def test_root_agent_has_two_sub_agents():
+def test_root_agent_keeps_only_leave_local():
     sub_names = {getattr(a, "name", "") for a in root_agent.sub_agents}
-    assert "leave_agent" in sub_names
-    assert "hr_consult_agent" in sub_names
-    # 同一对象实例（不是副本）
+    assert sub_names == {"leave_agent"}
     assert any(a is leave_agent for a in root_agent.sub_agents)
-    assert any(a is consult_agent for a in root_agent.sub_agents)
 
 
-def test_root_agent_tools_include_query_and_jump():
+def test_root_agent_keeps_only_page_jump_tool():
     names = _tool_names(root_agent)
-    expected = {"page_jump", "get_leave_balance", "get_medical_period", "calc_annual_leave"}
-    assert expected <= names
+    assert names == {"page_jump"}
 
 
 def test_root_agent_mounts_jump_marker_callback():

@@ -16,8 +16,8 @@ import pytest
 import yaml
 from google.genai import types
 
-from agent import root_agent
 from packages.hr_domain.gaia import client as gaia_client_module
+from tests.eval.local_agent import root_agent
 
 DUMMY_KEY = "dummy-for-struct-test-only"
 

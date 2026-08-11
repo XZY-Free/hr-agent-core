@@ -10,7 +10,6 @@ from uuid import uuid4
 from apps.orchestrator.a2a.routing import (
     DeterministicRouteTable,
     RouteTarget,
-    transport_mode,
 )
 from packages.agent_runtime.a2a.client import (
     A2AInvocationError,
@@ -64,23 +63,19 @@ class OrchestratorRemoteRouter:
     def __init__(
         self,
         *,
-        consult_transport: str,
-        employee_data_transport: str,
         client=None,
         route_table: DeterministicRouteTable | None = None,
         session_exists=None,
+        context_summary_provider=None,
         consult_url: str = "http://127.0.0.1:8101",
         employee_data_url: str = "http://127.0.0.1:8102",
     ):
-        self.consult_transport = transport_mode("HR_CONSULT_TRANSPORT", consult_transport)
-        self.employee_data_transport = transport_mode(
-            "HR_EMPLOYEE_DATA_TRANSPORT", employee_data_transport
-        )
         self.client = client or OfficialA2AClient(
             timeout_seconds=float(os.getenv("HR_A2A_TIMEOUT_SECONDS", "30"))
         )
         self.route_table = route_table or DeterministicRouteTable()
         self.session_exists = session_exists
+        self.context_summary_provider = context_summary_provider
         self.consult_url = consult_url
         self.employee_data_url = employee_data_url
 
@@ -96,19 +91,35 @@ class OrchestratorRemoteRouter:
         target = self.route_table.decide(message, user_id=user_id, session_id=session_id)
         if target == RouteTarget.LOCAL:
             return None
-        if target == RouteTarget.CONSULT and self.consult_transport == "local":
-            return None
-        if target == RouteTarget.EMPLOYEE_DATA and self.employee_data_transport == "local":
-            return None
-
+        request_id = str(uuid4())
+        context_summary = ""
+        try:
+            if target == RouteTarget.CONSULT and self.context_summary_provider is not None:
+                context_summary = await self.context_summary_provider(
+                    user_id=user_id,
+                    session_id=session_id,
+                    message=message,
+                )
+                if not isinstance(context_summary, str) or contains_sensitive_data(
+                    context_summary
+                ):
+                    raise A2AInvocationError("a2a_security_error")
+        except A2AInvocationError as exc:
+            return RemoteRouteResponse(
+                answer="咨询服务暂时繁忙，请稍后重试。",
+                request_id=request_id,
+                target=CONSULT_SPEC.agent_name,
+                status="failed",
+                error_code=exc.error_code,
+            )
         request = A2ARequestContext(
-            request_id=str(uuid4()),
+            request_id=request_id,
             user_id=user_id,
             session_id=session_id,
             caller_agent="hr_orchestrator",
             locale="zh-CN",
             message=message,
-            context_summary="",
+            context_summary=context_summary,
         )
         spec = CONSULT_SPEC if target == RouteTarget.CONSULT else EMPLOYEE_SPEC
         base_url = self.consult_url if target == RouteTarget.CONSULT else self.employee_data_url

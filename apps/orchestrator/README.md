@@ -16,14 +16,9 @@
 
 远端目标由确定性规则选择，不由模型自由选择。本批不使用A2A Space语义发现。
 
-## Transport
+## A2A端点
 
-| 变量 | 默认值 | 允许值 |
-|---|---|---|
-| `HR_CONSULT_TRANSPORT` | `local` | `local`、`a2a` |
-| `HR_EMPLOYEE_DATA_TRANSPORT` | `local` | `local`、`a2a` |
-
-端点分别由`HR_CONSULT_A2A_URL`和`HR_EMPLOYEE_DATA_A2A_URL`配置，默认是`http://127.0.0.1:8101`和`http://127.0.0.1:8102`。端点变量不是第三个transport开关。
+端点分别由`HR_CONSULT_A2A_URL`和`HR_EMPLOYEE_DATA_A2A_URL`配置，本地默认是`http://127.0.0.1:8101`和`http://127.0.0.1:8102`。生产装配固定调用A2A，没有local transport开关或静默回退。
 
 远端请求只发送`request_id/user_id/session_id/caller_agent/locale/message/context_summary`。不发送完整session、提示词、历史、employeeId或任何密钥。A2A失败返回目标专用安全话术，不走本地静默兜底。
 

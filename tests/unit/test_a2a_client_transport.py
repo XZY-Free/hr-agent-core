@@ -39,6 +39,20 @@ class FailingResolver:
         raise self.error
 
 
+class RecordingAsyncClient:
+    headers = None
+
+    def __init__(self, *, timeout, headers=None):
+        self.timeout = timeout
+        RecordingAsyncClient.headers = headers
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("error", "expected"),
@@ -77,3 +91,29 @@ async def test_transport_failures_are_classified_without_exposing_raw_error(
         )
     assert exc_info.value.error_code == expected
     assert str(error) not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_runtime_api_key_is_sent_only_as_authorization_header(monkeypatch):
+    FailingResolver.error = httpx.ReadTimeout(
+        "timeout",
+        request=httpx.Request("GET", "https://consult.example.invalid"),
+    )
+    monkeypatch.setattr(client_module.httpx, "AsyncClient", RecordingAsyncClient)
+    monkeypatch.setattr(client_module, "A2ACardResolver", FailingResolver)
+    client = OfficialA2AClient(
+        timeout_seconds=0.5,
+        runtime_api_keys={"https://consult.example.invalid": "runtime-secret"},
+    )
+
+    with pytest.raises(A2AInvocationError):
+        await client.invoke(
+            base_url="https://consult.example.invalid/",
+            request=REQUEST,
+            spec=SPEC,
+        )
+
+    assert RecordingAsyncClient.headers == {
+        "Authorization": "Bearer runtime-secret"
+    }
+    assert "runtime-secret" not in str(REQUEST.model_dump())

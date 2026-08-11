@@ -31,3 +31,9 @@ def run_local_server() -> None:
     import uvicorn
 
     uvicorn.run(build_a2a_app(), host="127.0.0.1", port=8102)
+
+
+def run_cloud_server() -> None:
+    import uvicorn
+
+    uvicorn.run(build_a2a_app(), host="0.0.0.0", port=8000)

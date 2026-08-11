@@ -34,13 +34,6 @@ _PROVINCE_ONLY = re.compile(
 )
 
 
-def transport_mode(name: str, value: str) -> str:
-    normalized = value.strip().lower()
-    if normalized not in {"local", "a2a"}:
-        raise RuntimeError(f"{name}仅支持local或a2a")
-    return normalized
-
-
 class DeterministicRouteTable:
     def __init__(self):
         self._pending: dict[tuple[str, str], RouteTarget] = {}

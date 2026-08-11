@@ -1,5 +1,7 @@
 """hr-employee-data-agent公开AgentCard。"""
 
+import os
+
 from a2a.types import AgentCapabilities, AgentCard, AgentProvider, AgentSkill
 
 
@@ -8,23 +10,31 @@ AGENT_VERSION = "1.0.0"
 LOCAL_BASE_URL = "http://127.0.0.1:8102"
 
 
-def _skill(skill_id: str, name: str, description: str) -> AgentSkill:
+def _skill(
+    skill_id: str,
+    name: str,
+    description: str,
+    tags: list[str],
+) -> AgentSkill:
     return AgentSkill(
         id=skill_id,
         name=name,
         description=description,
-        tags=["当前员工", "本人数据", "只读"],
+        tags=tags,
         input_modes=["text"],
         output_modes=["text"],
     )
 
 
-def build_agent_card(base_url: str = LOCAL_BASE_URL) -> AgentCard:
+def build_agent_card(base_url: str | None = None) -> AgentCard:
+    base_url = base_url or os.getenv(
+        "HR_EMPLOYEE_DATA_A2A_BASE_URL", LOCAL_BASE_URL
+    )
     return AgentCard(
         name=AGENT_NAME,
         description=(
-            "查询当前员工本人的假期余额、医疗期、工龄与年假折算，只读；"
-            "不解释制度，不办理请假，不查询其他员工。"
+            "Provides authenticated employees with their own leave balance, medical "
+            "period, and annual leave calculation. Uses stub data in this deployment."
         ),
         version=AGENT_VERSION,
         protocol_version="0.3.0",
@@ -38,12 +48,24 @@ def build_agent_card(base_url: str = LOCAL_BASE_URL) -> AgentCard:
             url=base_url.rstrip("/"),
         ),
         skills=[
-            _skill("employee-leave-balance-query", "本人假期余额查询", "查询当前员工本人的假期余额"),
-            _skill("employee-medical-period-query", "本人医疗期查询", "查询当前员工本人的医疗期"),
+            _skill(
+                "employee-leave-balance-query",
+                "Employee Leave Balance Query",
+                "Queries the authenticated employee's own leave balance.",
+                ["hr", "employee-data", "leave-balance"],
+            ),
+            _skill(
+                "employee-medical-period-query",
+                "Employee Medical Period Query",
+                "Queries the authenticated employee's own medical period.",
+                ["hr", "employee-data", "medical-period"],
+            ),
             _skill(
                 "employee-annual-leave-calculation",
-                "本人年假折算",
-                "查询当前员工工龄并计算本人年假档位与折算结果",
+                "Employee Annual Leave Calculation",
+                "Calculates the authenticated employee's own annual leave based on "
+                "service years.",
+                ["hr", "employee-data", "annual-leave"],
             ),
         ],
     )

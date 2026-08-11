@@ -1,0 +1,415 @@
+resources:
+  - name: hr-agent-nbgplh40
+    id: r-yerqme2fb4gumvo41qdj
+    region: cn-beijing
+    project: default
+    type: Runtime
+    status: Ready
+    purpose: existing-hr-agent
+    existing: true
+    planned_create: false
+    estimated_billing_type: pay-as-you-go-cpu-memory-and-traffic
+
+  - name: Default
+    id: as-yeq7yn15a8b1qjcc1anl
+    region: cn-beijing
+    project: default
+    type: A2A-Space
+    status: existing-intent-disabled
+    purpose: account-default-space-not-used-by-this-deployment
+    existing: true
+    planned_create: false
+    estimated_billing_type: no-separate-public-unit-confirmed
+
+  - name: unnamed-failed-runtime-agent
+    id: a-yeqhqei874b1qjcc1igm
+    region: cn-beijing
+    project: default
+    type: A2A-Agent
+    status: failed
+    purpose: existing-unrelated-agent-in-default-space
+    existing: true
+    planned_create: false
+    estimated_billing_type: no-separate-public-unit-confirmed
+
+  - name: agentkit_test
+    id: kb-yes5i63chs5agefdmxbg
+    region: cn-beijing
+    project: default
+    type: AgentKit-Knowledge
+    status: Ready
+    purpose: existing-unrelated-agentkit-knowledge
+    existing: true
+    planned_create: false
+    estimated_billing_type: provider-resource-and-call-dependent
+
+  - name: policy
+    id: kb-980dcaa4acfa00ab
+    region: cn-beijing
+    project: default
+    type: Viking-Knowledge-Collection
+    status: existing
+    purpose: hr-consult-policy-scope
+    existing: true
+    planned_create: false
+    estimated_billing_type: existing-viking-resource-and-call-charges
+
+  - name: handbook
+    id: kb-2d7e599f63d649ca
+    region: cn-beijing
+    project: default
+    type: Viking-Knowledge-Collection
+    status: existing
+    purpose: hr-consult-handbook-scope
+    existing: true
+    planned_create: false
+    estimated_billing_type: existing-viking-resource-and-call-charges
+
+  - name: salary
+    id: kb-4ae7a7054f1f23c9
+    region: cn-beijing
+    project: default
+    type: Viking-Knowledge-Collection
+    status: existing
+    purpose: hr-consult-salary-scope
+    existing: true
+    planned_create: false
+    estimated_billing_type: existing-viking-resource-and-call-charges
+
+  - name: childcare
+    id: kb-70c742e37ef4cfd8
+    region: cn-beijing
+    project: default
+    type: Viking-Knowledge-Collection
+    status: existing
+    purpose: hr-consult-childcare-scope
+    existing: true
+    planned_create: false
+    estimated_billing_type: existing-viking-resource-and-call-charges
+
+  - name: agentkit-platform-2101533667
+    id: null
+    region: cn-beijing
+    project: default
+    type: Container-Registry
+    status: Running
+    purpose: existing-agentkit-image-registry
+    existing: true
+    planned_create: false
+    estimated_billing_type: post-charge-storage-build-and-traffic-dependent
+
+  - name: AgentKit_Runtime_Default_ServiceRole_nnfyh40
+    id: null
+    region: global
+    project: default
+    type: IAM-Role
+    status: existing
+    purpose: existing-hr-runtime-service-role
+    existing: true
+    planned_create: false
+    estimated_billing_type: no-direct-role-charge-confirmed
+
+  - name: hr-orchestrator-dev
+    id: r-yesl0dq03knlc0d1qd1z
+    region: cn-beijing
+    project: default
+    type: Runtime
+    status: Ready-version-4-a2a-only-21-of-21
+    purpose: development-orchestrator
+    existing: false
+    planned_create: false
+    estimated_billing_type: pay-as-you-go-cpu-memory-and-traffic
+    retained: true
+    runtime_spec:
+      cpu_milli: 1000
+      memory_mb: 2048
+      min_instance: 0
+      max_instance: 1
+      max_concurrency: 10
+      apmplus_enable: true
+      tls_mode: not-explicitly-configured
+    artifact_tag: e827b01-stage1-orchestrator-a2a-only
+    cloud_core_eval_before_dual_track_cleanup: 21-passed
+    cloud_core_eval_after_dual_track_cleanup: 21-passed
+    local_consult_production_path: removed
+    local_employee_data_production_path: removed
+
+  - name: hr-consult-agent-dev
+    id: r-yesipag934nlc0d1rigw
+    region: cn-beijing
+    project: default
+    type: Runtime
+    status: Ready-version-5-six-fixes-image
+    purpose: development-consult-agent
+    existing: false
+    planned_create: false
+    estimated_billing_type: pay-as-you-go-cpu-memory-model-viking-and-observability
+    retained: true
+    runtime_spec:
+      cpu_milli: 1000
+      memory_mb: 2048
+      min_instance: 0
+      max_instance: 1
+      max_concurrency: 10
+      apmplus_enable: true
+      tls_mode: platform-managed
+    a2a_association: running-agent-a-yesixjxerktkc0sp5232
+    artifact_tag: e827b01-stage1-six-fixes
+
+  - name: hr-employee-data-agent-dev
+    id: r-yesipooydceuszqwte9y
+    region: cn-beijing
+    project: default
+    type: Runtime
+    status: Ready-version-5-six-fixes-image-stub
+    purpose: development-employee-data-agent
+    existing: false
+    planned_create: false
+    estimated_billing_type: pay-as-you-go-cpu-memory-model-gaia-and-observability
+    retained: true
+    runtime_spec:
+      cpu_milli: 1000
+      memory_mb: 2048
+      min_instance: 0
+      max_instance: 1
+      max_concurrency: 10
+      apmplus_enable: true
+      tls_mode: platform-managed
+    data_source: stub
+    a2a_association: running-agent-a-yesixlrfggt8ocx1or9n
+    artifact_tag: e827b01-stage1-six-fixes
+
+  - name: hr-agents-dev
+    id: as-yesioj26f4tkc0sp4xnl
+    region: cn-beijing
+    project: default
+    type: A2A-Space
+    status: created-intent-disabled-two-running-agents
+    purpose: development-explicit-a2a-registration
+    existing: false
+    planned_create: false
+    estimated_billing_type: no-separate-public-unit-confirmed
+    retained: true
+
+  - name: deleted-private-consult-registration
+    id: a-yesiq3eigwt8ocx1pjf7
+    region: cn-beijing
+    project: default
+    type: A2A-Agent
+    status: deleted
+    purpose: deleted-failed-runtime-source-private-registration-targeting-hr-consult-agent
+    existing: false
+    planned_create: false
+    estimated_billing_type: no-separate-public-unit-confirmed
+    retained: false
+    source: Runtime
+    target_runtime_id: r-yesipag934nlc0d1rigw
+    requested_network_type: private
+    error_code: InternalError
+    error_message: network-type-private-does-not-match-runtime-endpoint
+    request_id: 20260810122256093B0BC8E43BBAC801C9
+    delete_request_id: 2026081013183153DAF98E19B61734CA37
+
+  - name: unnamed-failed-public-consult-registration
+    id: a-yesitqdywwt8ocx1om2u
+    region: cn-beijing
+    project: default
+    type: A2A-Agent
+    status: deleted
+    purpose: failed-runtime-source-public-registration-targeting-hr-consult-agent
+    existing: false
+    planned_create: false
+    estimated_billing_type: no-separate-public-unit-confirmed
+    retained: false
+    source: Runtime
+    target_runtime_id: r-yesipag934nlc0d1rigw
+    requested_network_type: public
+    error_code: InvalidParameter.agentCard.skills[0].name
+    error_message: value-contains-a-non-printable-ASCII-character-at-position-0
+    request_id: 2026081013185334273F7DD976FB2D1210
+    delete_verified: true
+
+  - name: hr-consult-agent
+    id: a-yesixjxerktkc0sp5232
+    region: cn-beijing
+    project: default
+    type: A2A-Agent
+    status: running
+    purpose: runtime-source-consult-registration
+    existing: false
+    planned_create: false
+    estimated_billing_type: no-separate-public-unit-confirmed
+    retained: true
+    source: Runtime
+    target_runtime_id: r-yesipag934nlc0d1rigw
+    network_type: public
+    version: 1.0.0
+
+  - name: hr-employee-data-agent
+    id: a-yesixlrfggt8ocx1or9n
+    region: cn-beijing
+    project: default
+    type: A2A-Agent
+    status: running
+    purpose: runtime-source-employee-data-registration
+    existing: false
+    planned_create: false
+    estimated_billing_type: no-separate-public-unit-confirmed
+    retained: true
+    source: Runtime
+    target_runtime_id: r-yesipooydceuszqwte9y
+    network_type: public
+    version: 1.0.0
+
+  - name: SessionStore
+    id: null
+    region: cn-beijing
+    project: default
+    type: SessionStore
+    status: unknown-cli-unsupported-and-read-api-returned-404
+    purpose: optional-orchestrator-persistence
+    existing: unknown
+    planned_create: false
+    estimated_billing_type: database-backend-dependent
+
+  - name: hr-agents-dev-vpc
+    id: null
+    region: cn-beijing
+    project: default
+    type: VPC
+    status: not-created-stage1-explicitly-forbidden
+    purpose: private-runtime-and-a2a-network
+    existing: false
+    planned_create: false
+    estimated_billing_type: vpc-components-and-egress-dependent
+
+  - name: hr-agents-dev-subnet
+    id: null
+    region: cn-beijing
+    project: default
+    type: Subnet
+    status: not-created-stage1-explicitly-forbidden
+    purpose: private-runtime-and-a2a-network
+    existing: false
+    planned_create: false
+    estimated_billing_type: vpc-components-dependent
+
+  - name: hr-consult-agent-dev-key
+    id: null
+    region: cn-beijing
+    project: default
+    type: Runtime-API-Key
+    status: created-by-runtime-api
+    purpose: required-key-auth-for-hr-consult-agent-dev
+    existing: false
+    planned_create: false
+    estimated_billing_type: no-separate-public-unit-confirmed
+    retained: true
+    secret_value_recorded: false
+
+  - name: hr-employee-data-agent-dev-key
+    id: null
+    region: cn-beijing
+    project: default
+    type: Runtime-API-Key
+    status: created-by-runtime-api
+    purpose: required-key-auth-for-hr-employee-data-agent-dev
+    existing: false
+    planned_create: false
+    estimated_billing_type: no-separate-public-unit-confirmed
+    retained: true
+    secret_value_recorded: false
+
+  - name: hr-orchestrator-dev-key
+    id: null
+    region: cn-beijing
+    project: default
+    type: Runtime-API-Key
+    status: created-by-runtime-api
+    purpose: required-key-auth-for-hr-orchestrator-dev
+    existing: false
+    planned_create: false
+    estimated_billing_type: no-separate-public-unit-confirmed
+    retained: true
+    secret_value_recorded: false
+
+  - name: hr-agent-vkba:e827b01-stage1
+    id: sha256:00d155617b59308a478f09f84a44df608da3c92cf5b50e94e68cde2e6c15566b
+    region: cn-beijing
+    project: default
+    type: Container-Image
+    status: pushed-retained
+    purpose: immutable-stage1-runtime-artifact
+    existing: false
+    planned_create: false
+    estimated_billing_type: container-registry-storage-and-traffic
+    retained: true
+
+  - name: hr-agent-vkba:e827b01-stage1-card-ascii
+    id: sha256:05a20b2ecb68f1dbf1527cde9d028889016779e8b556e1ddfa175915dd056fc6
+    region: cn-beijing
+    project: default
+    type: Container-Image
+    status: tag-deleted-after-zero-runtime-reference
+    purpose: immutable-ascii-agent-card-runtime-artifact
+    existing: false
+    planned_create: false
+    estimated_billing_type: container-registry-storage-and-traffic
+    retained: false
+
+  - name: hr-agent-vkba:e827b01-orchestrator-a2a-auth
+    id: sha256:b8ebd70a1bf153646a0ff0382e5008af962d5e3b3fa63bacbcb78f0ab7e14115
+    region: cn-beijing
+    project: default
+    type: Container-Image
+    status: tag-deleted-after-zero-runtime-reference
+    purpose: immutable-orchestrator-a2a-key-auth-artifact
+    existing: false
+    planned_create: false
+    estimated_billing_type: container-registry-storage-and-traffic
+    retained: false
+
+  - name: hr-agent-vkba:e827b01-stage1-clean
+    id: sha256:bffd2ef5e0d7a8aa2c272430f30c35f3e8bec25a1ffa76d34d8a848dd83ab6cc
+    region: cn-beijing
+    project: default
+    type: Container-Image
+    status: pushed-retained-zero-runtime-reference
+    purpose: clean-immutable-stage1-runtime-artifact
+    existing: false
+    planned_create: false
+    estimated_billing_type: container-registry-storage-and-traffic
+    retained: true
+    prohibited_path_count: 0
+    final_secret_hit_count: 0
+    layer_secret_hit_count: 0
+
+  - name: hr-agent-vkba:e827b01-stage1-six-fixes
+    id: sha256:4f6ca82659072950ea031f094306799eec50a483c3dc7b0342cb3cb23c33cf0e
+    region: cn-beijing
+    project: default
+    type: Container-Image
+    status: pushed-retained-referenced-by-consult-and-employee-data
+    purpose: immutable-six-cloud-failure-fixes-artifact
+    existing: false
+    planned_create: false
+    estimated_billing_type: container-registry-storage-and-traffic
+    retained: true
+    prohibited_path_count: 0
+    final_secret_hit_count: 0
+    layer_secret_hit_count: 0
+
+  - name: hr-agent-vkba:e827b01-stage1-orchestrator-a2a-only
+    id: sha256:c0e345f130fa9a6e911faaa39685f265514eb677b85aa295e5c3bd9cbd2cbdfa
+    region: cn-beijing
+    project: default
+    type: Container-Image
+    status: pushed-retained-referenced-by-orchestrator
+    purpose: immutable-orchestrator-a2a-only-artifact
+    existing: false
+    planned_create: false
+    estimated_billing_type: container-registry-storage-and-traffic
+    retained: true
+    prohibited_path_count: 0
+    final_secret_hit_count: 0
+    layer_secret_hit_count: 0

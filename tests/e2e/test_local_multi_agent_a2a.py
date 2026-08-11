@@ -105,9 +105,7 @@ def multi_agent_stack():
         ),
         observer=employee_observations.append,
     )
-    orchestrator = build_agent_application(
-        consult_transport="a2a", employee_data_transport="a2a"
-    )
+    orchestrator = build_agent_application()
     servers = [
         uvicorn.Server(uvicorn.Config(
             build_consult_app(consult_runtime),
