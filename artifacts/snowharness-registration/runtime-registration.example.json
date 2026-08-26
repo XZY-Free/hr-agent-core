@@ -1,0 +1,12 @@
+{
+  "contract_snapshot_id": "<contract_snapshot_id-from-contract-import>",
+  "runtime_endpoint": "https://hr-assistant.example.invalid/",
+  "authentication": {
+    "mode": "none",
+    "credential_ref_id": null
+  },
+  "conformance": {
+    "start_input": "我想请假",
+    "resume_input": "年休假，明天一天"
+  }
+}

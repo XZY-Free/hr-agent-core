@@ -178,11 +178,13 @@ def test_agent_tools_and_prompt_content_are_frozen():
     prompts = {
         "apps.orchestrator.prompts": (
             "MAIN_AGENT_PROMPT",
-            "f9b4ee7076ae73ba98fd4798b27459971c592cdf776b0cc50268d62f79afd7fa",
+            # 批次2公共契约化：新增【执行上下文】可信日期时间说明行。
+            "70b50b114ddda39558fdce917319365b31d53ef676c422bd3b563777ecd8c682",
         ),
         "apps.orchestrator.local_leave.prompts": (
             "LEAVE_AGENT_PROMPT",
-            "9af5caaec42595570a3cf607c5bee1b809ec71ad6cddee6631e9fb9f5a5c7427",
+            # 批次2公共契约化：新增【执行上下文】可信日期时间说明行。
+            "a77fbbfbe086cc5e246d7ba607950d6895f44c9cb604d0baa562a846424e54e5",
         ),
         "apps.consult_agent.prompts": (
             "CONSULT_AGENT_PROMPT",

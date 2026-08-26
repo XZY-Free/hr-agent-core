@@ -12,3 +12,4 @@ agentkit.yaml
 requirements.txt
 Dockerfile
 .dockerignore
+.DS_Store

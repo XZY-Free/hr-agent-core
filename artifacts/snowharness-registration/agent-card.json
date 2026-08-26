@@ -1,0 +1,83 @@
+{
+  "capabilities": {
+    "streaming": true
+  },
+  "defaultInputModes": [
+    "text"
+  ],
+  "defaultOutputModes": [
+    "text"
+  ],
+  "description": "Enterprise HR Assistant: leave and attendance requests, employee self-service data, HR policy and benefits consultation, and HR system/document assistance. Input-required (waiting for user supplements) is supported; incremental token streaming is not provided (event streaming only). Error codes: identity_required, identity_unverified, input_required, not_found, rejected, temporarily_unavailable, failed, cancelled, contract_error.",
+  "name": "hr-assistant",
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.3.0",
+  "provider": {
+    "organization": "HR Agent Team",
+    "url": "https://hr-assistant.example.invalid"
+  },
+  "skills": [
+    {
+      "description": "Leave requests, leave-modification conversations, retroactive entries, leave-type understanding, date and duration understanding, submission after schedule/balance/eligibility checks, pre-submit confirmation, and follow-up communication on failures.",
+      "id": "leave-and-attendance-service",
+      "inputModes": [
+        "text"
+      ],
+      "name": "Leave and Attendance Service",
+      "outputModes": [
+        "text"
+      ],
+      "tags": [
+        "hr",
+        "leave-and-attendance-service"
+      ]
+    },
+    {
+      "description": "The employee's own leave balance, medical period, service years, and annual-leave proration.",
+      "id": "employee-self-service",
+      "inputModes": [
+        "text"
+      ],
+      "name": "Employee Self-Service",
+      "outputModes": [
+        "text"
+      ],
+      "tags": [
+        "hr",
+        "employee-self-service"
+      ]
+    },
+    {
+      "description": "Attendance rules, leave policies, onboarding and offboarding, probation, compensation, allowances, benefits, and region-specific HR policies.",
+      "id": "hr-policy-and-benefits-consultation",
+      "inputModes": [
+        "text"
+      ],
+      "name": "HR Policy and Benefits Consultation",
+      "outputModes": [
+        "text"
+      ],
+      "tags": [
+        "hr",
+        "hr-policy-and-benefits-consultation"
+      ]
+    },
+    {
+      "description": "HR system operation guides, HR handbook help, HR document Q&A, and lawful document-reference or attachment assistance.",
+      "id": "hr-system-and-document-assistance",
+      "inputModes": [
+        "text"
+      ],
+      "name": "HR System and Document Assistance",
+      "outputModes": [
+        "text"
+      ],
+      "tags": [
+        "hr",
+        "hr-system-and-document-assistance"
+      ]
+    }
+  ],
+  "url": "https://hr-assistant.example.invalid/",
+  "version": "1.0.0"
+}

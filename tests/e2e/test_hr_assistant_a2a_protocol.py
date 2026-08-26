@@ -1,0 +1,287 @@
+"""通过127.0.0.1真实网络验证顶层企业人力智能助手公共A2A契约（批次6）。
+
+录制runtime只验证协议层与公共合同；真实模型链路由评测与e2e覆盖。
+"""
+
+import socket
+import threading
+import time
+from uuid import uuid4
+
+import httpx
+import pytest
+import uvicorn
+from a2a.client.card_resolver import A2ACardResolver
+from a2a.client.client_factory import ClientConfig, ClientFactory
+from a2a.client.errors import A2AClientError
+from a2a.types import DataPart, Message, Part, Role, Task, TextPart
+
+from apps.orchestrator.public_a2a.server import build_public_a2a_app
+from apps.orchestrator.public_runtime.result import (
+    completed,
+    input_required,
+)
+
+
+BASE_URL = "http://127.0.0.1:8100"
+
+
+class RecordingRuntime:
+    """按消息脚本返回公共结果的录制门面。"""
+
+    def __init__(self):
+        self.payloads = []
+
+    async def invoke(self, payload: dict):
+        self.payloads.append(payload)
+        message = payload["message"]
+        if "帮我请假" in message:
+            return input_required(
+                request_id=payload["request_id"],
+                answer="请问假期类型和日期分别是什么？",
+            )
+        return completed(
+            request_id=payload["request_id"],
+            answer=f"session={payload['context_id']}",
+            result_type="conversation",
+            data={"echo_subject": bool(payload.get("execution_subject"))},
+        )
+
+
+@pytest.fixture(scope="module")
+def protocol_server():
+    runtime = RecordingRuntime()
+    server = uvicorn.Server(uvicorn.Config(
+        build_public_a2a_app(runtime=runtime, base_url=BASE_URL),
+        host="127.0.0.1",
+        port=8100,
+        log_level="warning",
+    ))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        with socket.socket() as sock:
+            if sock.connect_ex(("127.0.0.1", 8100)) == 0:
+                break
+        time.sleep(0.05)
+    else:
+        server.should_exit = True
+        thread.join(timeout=5)
+        raise RuntimeError("本地公共A2A测试服务未启动")
+    yield runtime
+    server.should_exit = True
+    thread.join(timeout=10)
+    assert not thread.is_alive()
+
+
+def _message(
+    text: str,
+    *,
+    context_id: str = "protocol-context",
+    task_id: str | None = None,
+    metadata: dict | None = None,
+) -> Message:
+    return Message(
+        role=Role.user,
+        message_id=str(uuid4()),
+        context_id=context_id,
+        task_id=task_id,
+        metadata=metadata,
+        parts=[Part(root=TextPart(text=text))],
+    )
+
+
+async def _official_call(message: Message, *, streaming: bool = False):
+    async with httpx.AsyncClient(timeout=10) as http:
+        card = await A2ACardResolver(http, BASE_URL).get_agent_card()
+        client = ClientFactory(ClientConfig(
+            streaming=streaming,
+            httpx_client=http,
+            supported_transports=["JSONRPC"],
+        )).create(card)
+        events = []
+        async for event in client.send_message(message):
+            events.append(event)
+        return card, events
+
+
+def _final_task(events) -> Task:
+    tasks = [event[0] for event in events if isinstance(event, tuple)]
+    assert tasks
+    return tasks[-1]
+
+
+def _data(task: Task) -> dict:
+    assert task.artifacts
+    for part in task.artifacts[-1].parts:
+        if isinstance(part.root, DataPart):
+            return part.root.data
+    raise AssertionError("Artifact缺少DataPart")
+
+
+@pytest.mark.asyncio
+async def test_top_level_card_discovered_by_official_resolver(protocol_server):
+    async with httpx.AsyncClient() as http:
+        card = await A2ACardResolver(http, BASE_URL).get_agent_card()
+    assert card.name == "hr-assistant"
+    assert card.version == "1.0.0"
+    assert card.protocol_version == "0.3.0"
+    assert card.preferred_transport == "JSONRPC"
+    assert [skill.id for skill in card.skills] == [
+        "leave-and-attendance-service",
+        "employee-self-service",
+        "hr-policy-and-benefits-consultation",
+        "hr-system-and-document-assistance",
+    ]
+    serialized = card.model_dump_json(by_alias=True, exclude_none=True)
+    for term in ("root_agent", "leave_agent", "hr-consult-agent",
+                 "hr-employee-data-agent", "veadk", "agentkit", "gaia"):
+        assert term not in serialized.lower(), term
+
+
+@pytest.mark.asyncio
+async def test_contract_discovery_endpoint_absent(protocol_server):
+    """架构澄清：合同是运营方导入SnowHarness的显式请求工件，
+    远程运行时不暴露合同发现端点；AgentCard发现保留为协议证据。"""
+    async with httpx.AsyncClient() as http:
+        card = await http.get(f"{BASE_URL}/.well-known/agent-card.json")
+        contract = await http.get(
+            f"{BASE_URL}/.well-known/agent-contract.json"
+        )
+    assert card.status_code == 200
+    assert contract.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_health_endpoint(protocol_server):
+    async with httpx.AsyncClient() as http:
+        response = await http.get(f"{BASE_URL}/health")
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "agent": "hr-assistant",
+        "version": "1.0.0",
+    }
+
+
+@pytest.mark.asyncio
+async def test_non_streaming_completed_with_public_result_schema(protocol_server):
+    _, events = await _official_call(_message("你好"))
+    task = _final_task(events)
+    data = _data(task)
+    assert task.status.state.value == "completed"
+    assert set(data) >= {
+        "request_id", "status", "answer", "result_type", "data", "actions",
+        "error_code", "retryable", "agent_name", "agent_version",
+    }
+    assert data["agent_name"] == "hr-assistant"
+    assert data["agent_version"] == "1.0.0"
+    assert data["actions"] == []
+    # 内部子智能体名称不泄露。
+    assert "consult" not in str(data).lower()
+
+
+@pytest.mark.asyncio
+async def test_streaming_transport_emits_events_without_incremental_claim(
+    protocol_server,
+):
+    _, events = await _official_call(_message("你好"), streaming=True)
+    task = _final_task(events)
+    update_types = {
+        type(event[1]).__name__ for event in events if event[1] is not None
+    }
+    assert "TaskArtifactUpdateEvent" in update_types
+    assert "TaskStatusUpdateEvent" in update_types
+    assert task.status.state.value == "completed"
+
+
+@pytest.mark.asyncio
+async def test_input_required_then_resume_same_task_and_context(protocol_server):
+    context_id = f"resume-ctx-{uuid4().hex[:8]}"
+    _, first_events = await _official_call(
+        _message("帮我请假", context_id=context_id)
+    )
+    first_task = _final_task(first_events)
+    assert first_task.status.state.value == "input-required"
+    first_data = _data(first_task)
+    assert first_data["status"] == "input_required"
+    assert first_data["error_code"] == "input_required"
+
+    # SnowHarness 补充信息：引用原taskId续发同一context。
+    _, second_events = await _official_call(
+        _message(
+            "年休假，明天一天",
+            context_id=context_id,
+            task_id=first_task.id,
+        )
+    )
+    second_task = _final_task(second_events)
+    assert second_task.status.state.value == "completed"
+    assert second_task.context_id == context_id
+    # 恢复的是同一个任务，不是新任务。
+    assert second_task.id == first_task.id
+    # 门面收到的是同一request_id（=原taskId）。
+    assert protocol_server.payloads[-1]["request_id"] == first_task.id
+    assert protocol_server.payloads[-1]["context_id"] == context_id
+
+
+@pytest.mark.asyncio
+async def test_two_tasks_same_context_get_different_task_ids(protocol_server):
+    context_id = f"multi-ctx-{uuid4().hex[:8]}"
+    _, first_events = await _official_call(_message("你好", context_id=context_id))
+    _, second_events = await _official_call(_message("再讲讲", context_id=context_id))
+    first_task = _final_task(first_events)
+    second_task = _final_task(second_events)
+    assert first_task.context_id == second_task.context_id == context_id
+    assert first_task.id != second_task.id
+    assert _data(first_task)["answer"] == f"session={context_id}"
+    assert _data(second_task)["answer"] == f"session={context_id}"
+
+
+@pytest.mark.asyncio
+async def test_sessions_are_isolated(protocol_server):
+    _, events_a = await _official_call(_message("你好", context_id="iso-a"))
+    _, events_b = await _official_call(_message("你好", context_id="iso-b"))
+    assert _data(_final_task(events_a))["answer"] == "session=iso-a"
+    assert _data(_final_task(events_b))["answer"] == "session=iso-b"
+
+
+@pytest.mark.asyncio
+async def test_execution_subject_flows_through_metadata(protocol_server):
+    before = len(protocol_server.payloads)
+    await _official_call(
+        _message(
+            "你好",
+            metadata={
+                "execution_subject": {"subject_id": "snow-user-9"},
+                "locale": "zh-CN",
+            },
+        )
+    )
+    payload = protocol_server.payloads[-1]
+    assert len(protocol_server.payloads) == before + 1
+    assert payload["execution_subject"] == {"subject_id": "snow-user-9"}
+    assert payload["context"]["locale"] == "zh-CN"
+
+
+@pytest.mark.asyncio
+async def test_sensitive_metadata_rejected_before_runtime(protocol_server, caplog):
+    before = len(protocol_server.payloads)
+    secret = "must-not-propagate-456"
+    with pytest.raises(A2AClientError):
+        await _official_call(
+            _message("你好", metadata={"client_secret": secret})
+        )
+    assert len(protocol_server.payloads) == before
+    assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_unknown_metadata_rejected_as_contract_error(protocol_server):
+    before = len(protocol_server.payloads)
+    with pytest.raises(A2AClientError):
+        await _official_call(
+            _message("你好", metadata={"caller_agent": "hr_orchestrator"})
+        )
+    assert len(protocol_server.payloads) == before
