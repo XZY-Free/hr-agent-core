@@ -10,7 +10,7 @@ import time
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events.event_queue import EventQueue
 from a2a.server.tasks.task_updater import TaskUpdater
-from a2a.types import InvalidParamsError
+from a2a.types import InvalidParamsError, UnsupportedOperationError
 from a2a.utils import new_task
 from a2a.utils.errors import ServerError
 
@@ -115,9 +115,7 @@ class HrAssistantExecutor(AgentExecutor):
             await updater.complete()
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
-        # 批次5审计结论：底层veADK/Tool无法真实中断，只做协议层取消接收，
-        # 公共合同不宣称强取消。
-        if not context.task_id or not context.context_id:
-            raise ServerError(error=InvalidParamsError(message="A2A任务字段无效"))
-        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
-        await updater.cancel()
+        # 公共合同 cancel=false：底层veADK/Tool无法真实中断，禁止把Task
+        # 标成cancelled但业务仍在运行的伪取消。tasks/cancel 一律返回
+        # a2a-sdk官方unsupported-operation错误。
+        raise ServerError(error=UnsupportedOperationError())

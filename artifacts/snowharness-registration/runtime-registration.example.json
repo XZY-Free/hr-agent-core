@@ -6,7 +6,15 @@
     "credential_ref_id": null
   },
   "conformance": {
-    "start_input": "我想请假",
-    "resume_input": "年休假，明天一天"
+    "basic": {
+      "input": "公司年休假的基本规则是什么？"
+    },
+    "input_required": {
+      "input": "我想请假"
+    },
+    "resume": {
+      "start_input": "我想请年假",
+      "resume_input": "明天一天"
+    }
   }
 }

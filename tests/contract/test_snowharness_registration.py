@@ -1,8 +1,12 @@
-"""批次8：SnowHarness注册包生成契约测试。
+"""阶段2 Track H：SnowHarness注册包生成契约测试。
 
 不变式：注册包是"运营方导入的合同工件 + 独立的运行时注册请求"，
 绝不让SnowHarness去黑盒运行时发现/拉取合同，也不附带自证式
 conformance报告。生成器是确定性产物构造，不是证据制造。
+
+阶段2新增：静态Card只以 example 形态存在（唯一live authority是HTTP
+discovery）；conformance schema是capability-driven的，HR contract
+cancel=false 因此绝不含cancel探针。
 """
 
 import importlib.util
@@ -13,6 +17,12 @@ from pathlib import Path
 import pytest
 
 from apps.orchestrator.public_contract.contract import build_agent_contract
+from apps.orchestrator.public_contract.interaction import (
+    CANCEL,
+    INPUT_REQUIRED,
+    RESUME,
+    STREAMING_TRANSPORT,
+)
 from apps.orchestrator.public_contract.validator import validate_contract
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -20,7 +30,7 @@ SCRIPT_PATH = REPO_ROOT / "scripts" / "generate_snowharness_registration.py"
 BASE_URL = "https://hr-assistant.example.invalid"
 
 EXPECTED_FILES = {
-    "agent-card.json",
+    "agent-card.example.json",
     "agent-contract.json",
     "runtime-registration.example.json",
     "snowharness-registration.md",
@@ -38,7 +48,14 @@ FORBIDDEN_MARKDOWN_PHRASES = (
     "已记录报告",
 )
 
-SECRET_MARKERS = ("bearer", "secret", "password", "api_key", "credential_ref_id=")
+# 禁止的是秘密值本身：bearer一词作为运行方式说明允许出现在runbook，
+# 但任何真实token/带值字段不得进入工件。
+SECRET_MARKERS = (
+    "authorization: bearer ",
+    "hr_assistant_a2a_bearer_token=",
+    "password",
+    "api_key",
+)
 
 
 def _load_generator():
@@ -67,7 +84,20 @@ def test_generated_file_set_is_exactly_four(generated):
     assert names == EXPECTED_FILES
 
 
-def test_runtime_registration_matches_snow_endpoint_schema(generated):
+def test_static_card_is_example_only(generated):
+    """静态Card只能是example：live AgentCard唯一Authority是HTTP discovery。"""
+    card = json.loads(
+        (generated / "agent-card.example.json").read_text(encoding="utf-8")
+    )
+    assert card["url"].startswith("https://hr-assistant.example.invalid")
+    assert card["protocolVersion"] == "0.3.0"
+    assert card["preferredTransport"] == "JSONRPC"
+    assert card["capabilities"]["streaming"] is True
+    # 旧文件名不得回潮（不留双文件兼容）。
+    assert not (generated / "agent-card.json").exists()
+
+
+def test_runtime_registration_matches_capability_driven_schema(generated):
     registration = json.loads(
         (generated / "runtime-registration.example.json").read_text(
             encoding="utf-8"
@@ -80,21 +110,22 @@ def test_runtime_registration_matches_snow_endpoint_schema(generated):
         "authentication",
         "conformance",
     }
-    # 占位符须明确非秘密；runtime_endpoint来自base_url。
-    assert isinstance(registration["contract_snapshot_id"], str)
-    assert registration["contract_snapshot_id"]
     assert registration["runtime_endpoint"] == f"{BASE_URL}/"
-    # 当前公共服务无bearer强制，示例必须诚实使用none/null。
+    # 默认example诚实使用none/null；bearer由operator在runbook指引下单独配置。
     assert registration["authentication"] == {
         "mode": "none",
         "credential_ref_id": None,
     }
-    # 安全的conformance输入；resume是补充信息，不是确认/提交。
-    assert registration["conformance"] == {
-        "start_input": "我想请假",
-        "resume_input": "年休假，明天一天",
+    conformance = registration["conformance"]
+    # capability-driven：basic + input_required + resume，绝不含cancel。
+    assert set(conformance) == {"basic", "input_required", "resume"}
+    assert conformance["basic"] == {"input": "公司年休假的基本规则是什么？"}
+    assert conformance["input_required"] == {"input": "我想请假"}
+    assert conformance["resume"] == {
+        "start_input": "我想请年假",
+        "resume_input": "明天一天",
     }
-    assert "确认" not in registration["conformance"]["resume_input"]
+    assert "确认" not in conformance["resume"]["resume_input"]
     serialized = json.dumps(registration, ensure_ascii=False)
     for forbidden in (
         "agent_card_url",
@@ -103,23 +134,43 @@ def test_runtime_registration_matches_snow_endpoint_schema(generated):
         "report",
         "capabilities",
         "digest",
+        "cancel",
     ):
         assert forbidden not in serialized, forbidden
 
 
-def test_markdown_imports_contract_then_registers_runtime(generated):
+def test_conformance_schema_consistent_with_interaction_contract(generated):
+    """conformance探针集合必须由interaction合同驱动，不得漂移。"""
+    assert STREAMING_TRANSPORT is True
+    assert INPUT_REQUIRED is True
+    assert RESUME is True
+    assert CANCEL is False
+    registration = json.loads(
+        (generated / "runtime-registration.example.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    # cancel=false → 不注册cancel探针（上面已断言"cancel"不在序列化中）。
+
+
+def test_markdown_is_operator_runbook(generated):
     markdown = (generated / "snowharness-registration.md").read_text(
         encoding="utf-8"
     )
     low = markdown.lower()
     for phrase in FORBIDDEN_MARKDOWN_PHRASES:
         assert phrase.lower() not in low, phrase
-    # 两步说明：先导入合同工件获得结构化ID，再提交运行时注册。
+    # operator runbook关键步骤。
     assert "导入" in markdown
     assert "runtime-registration" in markdown
     assert "contract_snapshot_id" in markdown
-    # 主动Conformance期间只拉取标准AgentCard，不做合同发现。
     assert "AgentCard" in markdown
+    assert "discovery" in markdown
+    assert "cancel=false" in markdown
+    assert "bearer" in markdown  # runbook单独说明bearer配置，但无真实token
+    # 不写SnowHarness内部源码路径。
+    assert "src/" not in markdown
+    assert "packages/" not in markdown
 
 
 def test_generated_artifacts_contain_no_secrets(generated):
@@ -130,9 +181,7 @@ def test_generated_artifacts_contain_no_secrets(generated):
 
 
 def test_generation_must_not_invoke_subprocess(monkeypatch, tmp_path):
-    """生成器是确定性产物构造：不允许在生成过程中起测试子进程。
-    先打桩标准库subprocess模块再加载生成器——Python返回同一模块对象，
-    生成器未来若import/使用subprocess同样会被拦截。"""
+    """生成器是确定性产物构造：不允许在生成过程中起测试子进程。"""
     forbidden = _ForbiddenSubprocess()
     for name in ("run", "Popen", "check_call", "check_output"):
         monkeypatch.setattr(subprocess, name, forbidden)
@@ -147,5 +196,25 @@ def test_contract_artifact_passes_validator_with_resume(generated):
     )
     assert validate_contract(contract) == []
     assert contract["interaction"]["resume"] is True
+    assert contract["interaction"]["cancel"] is False
     # 与代码生成源一致，非手工维护副本。
     assert contract == build_agent_contract()
+
+
+def test_fixed_conformance_inputs_match_plan(generated):
+    """阶段2方案05§5固定示例输入，静态示例必须有真实Provider test证明。"""
+    from apps.orchestrator.public_contract.interaction import interaction_payload
+
+    registration = json.loads(
+        (generated / "runtime-registration.example.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    conformance = registration["conformance"]
+    # 真实证明位于 tests/e2e/test_hr_assistant_a2a_protocol.py
+    # （basic→completed、我想请假/我想请年假→input-required、resume→终态）。
+    assert conformance["basic"]["input"] == "公司年休假的基本规则是什么？"
+    assert conformance["input_required"]["input"] == "我想请假"
+    assert conformance["resume"]["start_input"] == "我想请年假"
+    assert conformance["resume"]["resume_input"] == "明天一天"
+    _ = interaction_payload  # interaction合同保持代码生成源

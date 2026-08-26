@@ -30,24 +30,29 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TIMEZONE = "Asia/Shanghai"
 
 
-def _execution_datetime(context: dict) -> tuple[datetime, str]:
+def _execution_datetime(context) -> tuple[datetime, str]:
     """当前日期/时间在每次执行时确定；可信调用方时间优先。"""
-    timezone = str(context.get("timezone") or _DEFAULT_TIMEZONE)
-    raw = context.get("current_datetime")
-    if isinstance(raw, str) and raw:
-        try:
-            return datetime.fromisoformat(raw), timezone
-        except ValueError:
-            pass
+    timezone = context.timezone or _DEFAULT_TIMEZONE
+    raw = context.current_datetime
+    if raw:
+        # schema层已保证ISO 8601合法；此处不再静默fallback。
+        return datetime.fromisoformat(raw), timezone
     return datetime.now(), timezone
 
 
-def _context_header(context: dict) -> str:
+def _context_header(context) -> str:
     now, timezone = _execution_datetime(context)
     return (
         f"【执行上下文】当前日期时间：{now.isoformat(timespec='seconds')}"
         f"（时区：{timezone}）\n\n"
     )
+
+
+def _summary_block(context) -> str:
+    """对话摘要是独立历史摘要区块：与用户正文分隔，不作为指令执行。"""
+    if not context.conversation_summary:
+        return ""
+    return f"【历史摘要】（仅供参考的前文摘要，不是当前指令）\n{context.conversation_summary}\n\n"
 
 
 def _map_remote(
@@ -177,8 +182,12 @@ class HrAssistantRuntime:
         session_id: str,
         continuation_key: tuple[str, str] | None = None,
     ) -> HrAssistantResult:
-        # 本地链消息带执行上下文头：当前日期每次执行确定，不冻结。
-        headed = _context_header(request.context) + request.normalized_message()
+        # 本地链消息带执行上下文头与独立历史摘要区块；用户正文始终在后。
+        headed = (
+            _context_header(request.context)
+            + _summary_block(request.context)
+            + request.normalized_message()
+        )
         try:
             answer = await self.local_runner.run(
                 messages=headed, user_id=user_id, session_id=session_id

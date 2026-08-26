@@ -17,6 +17,7 @@ from a2a.client.errors import A2AClientError
 from a2a.types import DataPart, Message, Part, Role, Task, TextPart
 
 from apps.orchestrator.public_a2a.server import build_public_a2a_app
+from apps.orchestrator.public_a2a.settings import PublicA2ASettings
 from apps.orchestrator.public_runtime.result import (
     completed,
     input_required,
@@ -24,6 +25,13 @@ from apps.orchestrator.public_runtime.result import (
 
 
 BASE_URL = "http://127.0.0.1:8100"
+
+_SETTINGS = PublicA2ASettings(
+    listen_host="127.0.0.1",
+    listen_port=8100,
+    public_base_url=BASE_URL,
+    auth_mode="none",
+)
 
 
 class RecordingRuntime:
@@ -35,7 +43,7 @@ class RecordingRuntime:
     async def invoke(self, payload: dict):
         self.payloads.append(payload)
         message = payload["message"]
-        if "帮我请假" in message:
+        if "请假" in message or "请年假" in message:
             return input_required(
                 request_id=payload["request_id"],
                 answer="请问假期类型和日期分别是什么？",
@@ -52,7 +60,7 @@ class RecordingRuntime:
 def protocol_server():
     runtime = RecordingRuntime()
     server = uvicorn.Server(uvicorn.Config(
-        build_public_a2a_app(runtime=runtime, base_url=BASE_URL),
+        build_public_a2a_app(runtime=runtime, settings=_SETTINGS),
         host="127.0.0.1",
         port=8100,
         log_level="warning",
@@ -162,6 +170,8 @@ async def test_health_endpoint(protocol_server):
         "status": "ok",
         "agent": "hr-assistant",
         "version": "1.0.0",
+        "protocol_version": "0.3.0",
+        "auth_mode": "none",
     }
 
 
@@ -254,14 +264,20 @@ async def test_execution_subject_flows_through_metadata(protocol_server):
         _message(
             "你好",
             metadata={
-                "execution_subject": {"subject_id": "snow-user-9"},
+                "execution_subject": {
+                    "subject_id": "snow-user-9",
+                    "subject_kind": "platform_user",
+                },
                 "locale": "zh-CN",
             },
         )
     )
     payload = protocol_server.payloads[-1]
     assert len(protocol_server.payloads) == before + 1
-    assert payload["execution_subject"] == {"subject_id": "snow-user-9"}
+    assert payload["execution_subject"] == {
+        "subject_id": "snow-user-9",
+        "subject_kind": "platform_user",
+    }
     assert payload["context"]["locale"] == "zh-CN"
 
 
@@ -285,3 +301,50 @@ async def test_unknown_metadata_rejected_as_contract_error(protocol_server):
             _message("你好", metadata={"caller_agent": "hr_orchestrator"})
         )
     assert len(protocol_server.payloads) == before
+
+
+@pytest.mark.asyncio
+async def test_direct_tasks_cancel_returns_official_unsupported(protocol_server):
+    """cancel=false：直接调用tasks/cancel必须是官方unsupported错误，不伪取消。"""
+    _, events = await _official_call(_message("你好"))
+    task = _final_task(events)
+    async with httpx.AsyncClient() as http:
+        card = await A2ACardResolver(http, BASE_URL).get_agent_card()
+        client = ClientFactory(ClientConfig(
+            httpx_client=http, supported_transports=["JSONRPC"]
+        )).create(card)
+        with pytest.raises(A2AClientError):
+            from a2a.types import TaskIdParams
+
+            await client.cancel_task(TaskIdParams(id=task.id))
+
+
+@pytest.mark.asyncio
+async def test_registration_conformance_inputs_produce_expected_states(
+    protocol_server,
+):
+    """静态注册示例的固定输入必须有真实Provider协议证明：
+    basic → completed；input_required → input-required；
+    resume（start→input-required，resume→completed）。"""
+    # basic
+    _, basic_events = await _official_call(
+        _message("公司年休假的基本规则是什么？")
+    )
+    assert _final_task(basic_events).status.state.value == "completed"
+    # input_required
+    _, ir_events = await _official_call(_message("我想请假"))
+    assert _final_task(ir_events).status.state.value == "input-required"
+    # resume: start
+    context_id = f"conf-ctx-{uuid4().hex[:8]}"
+    _, start_events = await _official_call(
+        _message("我想请年假", context_id=context_id)
+    )
+    start_task = _final_task(start_events)
+    assert start_task.status.state.value == "input-required"
+    # resume: 补充信息，same task/context
+    _, resume_events = await _official_call(
+        _message("明天一天", context_id=context_id, task_id=start_task.id)
+    )
+    resume_task = _final_task(resume_events)
+    assert resume_task.status.state.value == "completed"
+    assert resume_task.id == start_task.id

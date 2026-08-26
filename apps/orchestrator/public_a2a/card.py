@@ -1,7 +1,5 @@
 """企业人力智能助手顶层AgentCard（SnowHarness 唯一可见身份）。"""
 
-import os
-
 from a2a.types import AgentCapabilities, AgentCard, AgentProvider, AgentSkill
 
 from apps.orchestrator.public_contract.capabilities import PUBLIC_CAPABILITIES
@@ -13,12 +11,12 @@ from apps.orchestrator.public_contract.identity import (
 from apps.orchestrator.public_contract.interaction import STREAMING_TRANSPORT
 from apps.orchestrator.public_contract.result_contract import ERROR_CODES
 
-LOCAL_BASE_URL = "http://127.0.0.1:8000"
+def build_agent_card(base_url: str) -> AgentCard:
+    """构造顶层公共AgentCard；卡片能力=任务领域，不暴露内部拓扑。
 
-
-def build_agent_card(base_url: str | None = None) -> AgentCard:
-    """构造顶层公共AgentCard；卡片能力=任务领域，不暴露内部拓扑。"""
-    base_url = base_url or os.getenv("HR_ASSISTANT_A2A_BASE_URL", LOCAL_BASE_URL)
+    base_url 由唯一 Settings Authority（public_a2a.settings）提供；
+    本模块不再读取环境变量，也不存在第二默认端点。
+    """
     return AgentCard(
         name=PUBLIC_AGENT_ID,
         description=(

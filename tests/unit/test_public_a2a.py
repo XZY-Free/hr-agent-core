@@ -227,11 +227,18 @@ def test_build_app_keeps_card_and_health_without_contract_discovery():
     """架构澄清：AgentCard发现与健康检查保留为协议证据；
     远程运行时不再暴露合同发现端点——合同是运营方导入的显式请求工件。"""
     from apps.orchestrator.public_a2a.server import build_public_a2a_app
+    from apps.orchestrator.public_a2a.settings import PublicA2ASettings
 
     class _Runtime:
         pass
 
-    app = build_public_a2a_app(runtime=_Runtime(), base_url=PUBLIC_URL)
+    settings = PublicA2ASettings(
+        listen_host="127.0.0.1",
+        listen_port=8100,
+        public_base_url=PUBLIC_URL,
+        auth_mode="none",
+    )
+    app = build_public_a2a_app(runtime=_Runtime(), settings=settings)
     paths = {route.path for route in app.routes}
     assert "/health" in paths
     # SDK默认提供 /.well-known/agent-card.json。
@@ -270,3 +277,15 @@ async def test_executor_resumes_current_task_instead_of_new_task(patch_updater, 
     # 未创建新任务：queue里只有状态/工件事件。
     task_events = [e for e in queue.events if getattr(e, "kind", None) is not None]
     assert all(getattr(e, "id", "task-resume") == "task-resume" for e in task_events)
+
+
+@pytest.mark.asyncio
+async def test_cancel_returns_official_unsupported():
+    """cancel=false：tasks/cancel必须是官方unsupported-operation，不伪取消。"""
+    from a2a.types import UnsupportedOperationError
+    from a2a.utils.errors import ServerError
+
+    executor = HrAssistantExecutor(FakeRuntime(None))
+    with pytest.raises(ServerError) as exc_info:
+        await executor.cancel(_Ctx(_message("你好")), FakeQueue())
+    assert isinstance(exc_info.value.error, UnsupportedOperationError)

@@ -1,13 +1,15 @@
-"""生成SnowHarness注册包（批次8：契约导入 + 运行时注册请求）。
+"""生成SnowHarness注册包（阶段2：契约导入 + 运行时注册请求）。
 
 产物是确定性的工件构造，不在生成过程中运行测试或制造自证报告：
-- agent-card.json
+- agent-card.example.json（静态示例，非live authority；live AgentCard只能
+  通过 HTTP discovery GET /.well-known/agent-card.json 获取）
 - agent-contract.json
-- runtime-registration.example.json
-- snowharness-registration.md
+- runtime-registration.example.json（capability-driven conformance schema）
+- snowharness-registration.md（operator runbook）
 
 用法：.venv/bin/python scripts/generate_snowharness_registration.py \
-    --base-url https://hr-assistant.example.invalid [--output artifacts/snowharness-registration]
+    [--base-url https://hr-assistant.example.invalid] \
+    [--output artifacts/snowharness-registration]
 """
 
 import argparse
@@ -32,29 +34,40 @@ from apps.orchestrator.public_contract.validator import (  # noqa: E402
 )
 
 DEFAULT_OUTPUT = REPO_ROOT / "artifacts" / "snowharness-registration"
+EXAMPLE_BASE_URL = "https://hr-assistant.example.invalid"
 
 # Snow端点请求体占位符：明确非秘密，由管理员导入合同后替换为真实ID。
 CONTRACT_SNAPSHOT_PLACEHOLDER = "<contract_snapshot_id-from-contract-import>"
-# 安全的Conformance输入：start触发input-required；resume为补充信息，
-# 绝不是"确认"，不会造成提交。
-CONFORMANCE_START_INPUT = "我想请假"
-CONFORMANCE_RESUME_INPUT = "年休假，明天一天"
+# 固定示例输入：必须与真实Provider测试证明能产生的预期状态一致
+# （tests/contract/test_snowharness_registration.py）。
+# basic → completed
+CONFORMANCE_BASIC_INPUT = "公司年休假的基本规则是什么？"
+# input_required → input-required
+CONFORMANCE_INPUT_REQUIRED_INPUT = "我想请假"
+# resume: start → input-required, resume → 补充信息（不含确认/提交）
+CONFORMANCE_RESUME_START_INPUT = "我想请年假"
+CONFORMANCE_RESUME_RESUME_INPUT = "明天一天"
 
 
 def _runtime_registration(base_url: str) -> dict:
     """构造与Snow运行时注册端点一致的请求体。
 
-    不复制智能体身份、能力、合同摘要或任何发现URL：
-    身份与能力属于已导入的合同快照，运行时端点才是本次注册的新事实。
-    当前公共服务未强制bearer认证，示例必须诚实地使用none/null。
+    conformance schema是capability-driven的：HR Contract声明
+    streaming=true / incremental=false / inputRequired=true / resume=true /
+    cancel=false / durable=false，因此只注册 basic、input_required、
+    resume 三个探针，绝不含cancel。
     """
     return {
         "contract_snapshot_id": CONTRACT_SNAPSHOT_PLACEHOLDER,
         "runtime_endpoint": f"{base_url.rstrip('/')}/",
         "authentication": {"mode": "none", "credential_ref_id": None},
         "conformance": {
-            "start_input": CONFORMANCE_START_INPUT,
-            "resume_input": CONFORMANCE_RESUME_INPUT,
+            "basic": {"input": CONFORMANCE_BASIC_INPUT},
+            "input_required": {"input": CONFORMANCE_INPUT_REQUIRED_INPUT},
+            "resume": {
+                "start_input": CONFORMANCE_RESUME_START_INPUT,
+                "resume_input": CONFORMANCE_RESUME_RESUME_INPUT,
+            },
         },
     }
 
@@ -70,12 +83,14 @@ def _markdown(contract: dict, registration: dict) -> str:
         f"| `{item['key']}` | {item['necessity']} |"
         for item in contract["invocation_context"]
     )
-    return f"""# SnowHarness 注册说明 — {PUBLIC_AGENT_NAME_ZH}
+    return f"""# SnowHarness 注册说明（Operator Runbook）— {PUBLIC_AGENT_NAME_ZH}
 
 - 稳定身份：`{PUBLIC_AGENT_ID}`（公共版本 `{PUBLIC_AGENT_VERSION}`）
-- Runtime 端点：`{runtime_endpoint}`
 - 协议：A2A 0.3.0（JSON-RPC over HTTP，SSE流式事件通道）
-- 认证方式：当前为 none（无强制认证；接入方按运行时实际配置填写）
+- 交互能力（与运行时一致，不得漂移）：
+  `streaming=true, incremental=false, inputRequired=true, resume=true,
+  cancel=false, durable=false`
+- 静态示例端点：`{runtime_endpoint}`（仅示例；live AgentCard只能HTTP discovery）
 
 ## 能力摘要（任务领域，非函数列表）
 
@@ -89,33 +104,55 @@ def _markdown(contract: dict, registration: dict) -> str:
 |---|---|
 {context_table}
 
-执行主体（execution_subject）不传 employee_id / corp_id / 任何内部凭据；
-身份映射由智能体内部完成，未验证身份返回稳定 `identity_unverified`。
+执行主体（execution_subject）只含 `subject_id` + `subject_kind`
+（`platform_user` / `platform_service`），不传 employee_id / corp_id /
+任何内部凭据；身份映射在智能体私有层完成，未验证身份返回稳定
+`identity_unverified`。
 
-## 注册步骤
+## Operator 注册步骤
 
-1. **导入合同工件**：管理员将 `agent-contract.json` 作为一次性请求输入
-   导入SnowHarness。SnowHarness解析后以结构化字段（身份、能力、
-   交互声明、结果合同等）存入数据库并返回 `contract_snapshot_id`；
-   原始合同文件是瞬时输入，SnowHarness不整体存储该文件，也不需要
-   再次读取它。
-2. **提交运行时注册**：运营方将 `runtime-registration.example.json` 中
-   的占位符 `{snapshot_placeholder}` 替换为上一步返回的真实ID，
-   填入实际 `runtime_endpoint` 与认证配置后提交。
-3. **执行Conformance**：SnowHarness主动调用运行时，期间只拉取标准
-   AgentCard（`/.well-known/agent-card.json`）作为协议证据，按
-   `conformance` 输入执行真实对话验证（start触发补充信息提示，
-   resume为补充说明文本，不含确认或提交动作）。
+1. **启动 Public A2A**：设置
+   `HR_ASSISTANT_A2A_HOST/PORT/PUBLIC_URL/AUTH_MODE`（见 `.env.example`）
+   并启动 hr-assistant 公共A2A进程。
+2. **health**：`GET <public_url>/health` 确认
+   `status/agent/version/protocol_version/auth_mode`。
+3. **live AgentCard**：`GET <public_url>/.well-known/agent-card.json`。
+   `card.url` 就是JSON-RPC端点；SnowHarness 的 `runtime_endpoint`
+   与 `card.url` 规范化后必须一致。静态 `agent-card.example.json`
+   不是live authority。
+4. **导入agent-contract**：管理员将 `agent-contract.json` 作为一次性
+   请求输入导入SnowHarness，得到 `contract_snapshot_id`。
+5. **AgentRevision**：在SnowHarness中基于导入的合同创建AgentRevision。
+6. **Runtime Registration**：把 `runtime-registration.example.json` 中
+   `{snapshot_placeholder}` 替换为真实ID，`runtime_endpoint` 替换为
+   live `card.url`，认证按实际配置填写后提交。
+7. **Publication**：发布该AgentRevision/RuntimeRevision。
+8. **Route**：在SnowHarness中配置Route/ExecutionBinding与允许的
+   Invocation Context。
+9. **Employee选择**：员工在SnowHarness中选择该Agent发起会话。
+10. **input-required/resume**：用 `conformance` 固定输入验证
+    input-required 与 same task/context resume。
+11. **cancel=false预期**：Conformance不跑cancel探针；UI无Stop；
+    直接调用 `tasks/cancel` 会收到官方unsupported-operation错误。
+12. **bearer可选**：`HR_ASSISTANT_A2A_AUTH_MODE=bearer` 时必须配置
+    `HR_ASSISTANT_A2A_BEARER_TOKEN`，并在SnowHarness用CredentialRef
+    引用凭据；禁止把真实token写进任何工件或git。
+
+## Subject → 内部映射（operator私下操作）
+
+- HR侧用 `scripts/public_subject_ref.py --subject-kind platform_user
+  --subject-id <snow-subject-id>` 计算 internal_user_id；
+- 管理员私下在 `EMPLOYEE_IDENTITY_MAP_JSON` 配置
+  `internal_user_id → employeeId`；
+- SnowHarness永不拥有employeeId，也不得保存/传递。
 
 运行时不提供远程合同端点；`agent-contract.json` 只通过上述导入步骤
-进入SnowHarness，不由平台从运行时拉取。本包不附带任何由提供方
-生成的测试结论。
+进入SnowHarness。本包不附带任何由提供方生成的测试结论。
 """
 
 
 def generate(base_url: str, output: Path) -> list[Path]:
     output.mkdir(parents=True, exist_ok=True)
-
     card = build_agent_card(base_url)
     contract = build_agent_contract()
     errors = validate_contract(contract)
@@ -127,7 +164,7 @@ def generate(base_url: str, output: Path) -> list[Path]:
     written = []
     card_payload = card.model_dump(mode="json", by_alias=True, exclude_none=True)
     for name, payload in (
-        ("agent-card.json", card_payload),
+        ("agent-card.example.json", card_payload),
         ("agent-contract.json", contract),
         ("runtime-registration.example.json", registration),
     ):
@@ -143,7 +180,7 @@ def generate(base_url: str, output: Path) -> list[Path]:
         _markdown(contract, registration), encoding="utf-8"
     )
     written.append(markdown_path)
-    # 只返回本次生成的四个产物；输出目录中的历史遗留文件由人工清理。
+    # 只返回本次生成的四个产物；旧 agent-card.json 由调用方删除，不留双文件。
     return sorted(written)
 
 
@@ -151,7 +188,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--base-url",
-        default="https://hr-assistant.example.invalid",
+        default=EXAMPLE_BASE_URL,
     )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     arguments = parser.parse_args()
