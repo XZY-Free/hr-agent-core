@@ -5,6 +5,7 @@
 """
 
 import logging
+import re
 from datetime import datetime
 
 from apps.orchestrator.a2a.router import RemoteRouteResponse
@@ -219,9 +220,10 @@ class HrAssistantRuntime:
         )
 
 
-# 本地链（Leave槽位收集）缺业务信息的确定性检测：模型追问必要槽位时
-# 统一转成公共 input-required，SnowHarness 补充后续发同一会话。
+# 当前本地 Runner 返回自然语言而非业务状态。识别明确追问和确认，
+# 不把问号当作等待输入的必要条件，也不将一般制度说明中的槽位词当追问。
 _MISSING_INFO_KEYWORDS = (
+    "假期",
     "假期类型",
     "哪种假",
     "什么假",
@@ -235,8 +237,18 @@ _MISSING_INFO_KEYWORDS = (
     "请假原因",
 )
 
+_INPUT_REQUEST = re.compile(
+    r"请(?:您|你)?(?:问|提供|补充|告知|告诉)|告诉我|告知我|"
+    r"(?:还需|需要)(?:您|你)|麻烦(?:您|你)?|"
+    r"哪天|哪种|什么|几天|多久|多长"
+)
+_CONFIRMATION_REQUEST = re.compile(r"请(?:您|你)?确认|是否确认|确认(?:无误)?后")
+
 
 def _looks_like_missing_info(answer: str) -> bool:
-    if "？" not in answer and "?" not in answer:
-        return False
-    return any(keyword in answer for keyword in _MISSING_INFO_KEYWORDS)
+    if _CONFIRMATION_REQUEST.search(answer):
+        return True
+    return (
+        any(keyword in answer for keyword in _MISSING_INFO_KEYWORDS)
+        and bool(_INPUT_REQUEST.search(answer))
+    )

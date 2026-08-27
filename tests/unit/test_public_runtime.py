@@ -306,6 +306,12 @@ def test_parse_public_request_rejects_corp_id_context():
     [
         ("好的，请问假期类型和日期分别是什么？", True),
         ("请问您想请哪种假？从哪天开始？", True),
+        ("你想请年假的话，还需要告诉我开始日期以及请假时长或结束日期哦。", True),
+        ("请补充开始日期和请假时长。", True),
+        ("请问您想申请什么类型的假期", True),
+        ("已整理好申请信息，请确认后再提交。", True),
+        ("请假申请需要填写日期和时长。", False),
+        ("开始日期为明天，时长一天，申请已提交。", False),
         ("申请已提交：年休假 2026-08-26 全天 1 天。", False),
         ("已为您打开我的表单。", False),
     ],
@@ -432,7 +438,7 @@ async def test_request_without_task_id_does_not_inherit_pending():
 async def test_pending_mark_clears_after_terminal_local_result():
     """本地续聊到达终态后，同一对的后续消息恢复正常路由。"""
     router = ScriptedRouter([None, _consult_response()])
-    runner = ScriptedRunner([_MISSING, "已了解，请确认信息。"])
+    runner = ScriptedRunner([_MISSING, "已取消本次请假办理。"])
     runtime = HrAssistantRuntime(remote_router=router, local_runner=runner)
 
     await runtime.invoke(_payload(message="我想请假", task_id="task-1"))
