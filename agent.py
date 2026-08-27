@@ -62,7 +62,18 @@ def build_agent_application(
             user_id=user_id,
             session_id=session_id,
         )
-        return session is not None
+        if session is not None:
+            return True
+        # 新会话首条消息：幂等预建 root session，使确定性远程路由从第一条
+        # 消息起生效（否则首条咨询类问题被门控拦回本地 root，而 root 无
+        # consult 本地子 Agent，会 transfer 失败）。create_session 幂等，
+        # 不写入任何状态；context_summary 对空 session 返回空串。
+        await memory.session_service.create_session(
+            app_name=root.name,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        return True
 
     async def context_summary_provider(
         *, user_id: str, session_id: str, message: str
