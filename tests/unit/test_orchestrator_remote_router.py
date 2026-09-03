@@ -93,7 +93,7 @@ async def test_remote_request_has_exact_allowlist(text, target, factory):
         request = kwargs["request"]
         data = factory(request_id=request.request_id)
         client.calls.append(kwargs)
-        return A2AInvocationResult(data=data, task_state="completed")
+        return A2AInvocationResult(data=data, task_state="completed", task_id="task-t", context_id="context-c")
 
     client.invoke = invoke
     router = OrchestratorRemoteRouter(client=client)
@@ -134,7 +134,7 @@ async def test_consult_and_employee_data_always_use_remote_agents():
         )
         client.calls.append(kwargs)
         return A2AInvocationResult(
-            data=factory(request_id=request.request_id), task_state="completed"
+            data=factory(request_id=request.request_id), task_state="completed", task_id="task-t", context_id="context-c"
         )
 
     client.invoke = invoke
@@ -219,7 +219,7 @@ async def test_invalid_or_sensitive_employee_artifact_is_never_used(patch):
     async def invoke(**kwargs):
         data = _employee_result(request_id=kwargs["request"].request_id)
         data.update(patch)
-        return A2AInvocationResult(data=data, task_state="completed")
+        return A2AInvocationResult(data=data, task_state="completed", task_id="task-t", context_id="context-c")
 
     client.invoke = invoke
     router = OrchestratorRemoteRouter(client=client)
@@ -238,7 +238,7 @@ async def test_unknown_response_fields_are_compatible():
             request_id=kwargs["request"].request_id,
             future_field={"safe": True},
         )
-        return A2AInvocationResult(data=data, task_state="completed")
+        return A2AInvocationResult(data=data, task_state="completed", task_id="task-t", context_id="context-c")
 
     client.invoke = invoke
     router = OrchestratorRemoteRouter(client=client)
@@ -259,7 +259,7 @@ async def test_document_answer_does_not_fake_knowledge_sources():
             knowledge_scope=None,
             sources=[],
         )
-        return A2AInvocationResult(data=data, task_state="completed")
+        return A2AInvocationResult(data=data, task_state="completed", task_id="task-t", context_id="context-c")
 
     client.invoke = invoke
     router = OrchestratorRemoteRouter(client=client)
@@ -278,7 +278,7 @@ async def test_knowledge_answer_without_sources_is_rejected():
             knowledge_scope="policy",
             sources=[],
         )
-        return A2AInvocationResult(data=data, task_state="completed")
+        return A2AInvocationResult(data=data, task_state="completed", task_id="task-t", context_id="context-c")
 
     client.invoke = invoke
     router = OrchestratorRemoteRouter(client=client)
@@ -307,7 +307,7 @@ async def test_consult_not_found_and_identity_unverified_have_frozen_user_behavi
                 data=None,
                 employee_ref=None,
             )
-        return A2AInvocationResult(data=data, task_state="completed")
+        return A2AInvocationResult(data=data, task_state="completed", task_id="task-t", context_id="context-c")
 
     client.invoke = invoke
     router = OrchestratorRemoteRouter(client=client)
@@ -332,7 +332,7 @@ async def test_explicit_cross_employee_query_is_sent_only_for_service_side_rejec
             employee_ref=None,
             error_code="cross_employee_query_not_allowed",
         )
-        return A2AInvocationResult(data=data, task_state="rejected")
+        return A2AInvocationResult(data=data, task_state="rejected", task_id="task-t", context_id="context-c")
 
     client.invoke = invoke
     router = OrchestratorRemoteRouter(client=client)

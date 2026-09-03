@@ -54,8 +54,7 @@ def _runtime_registration(base_url: str) -> dict:
 
     conformance schema是capability-driven的：HR Contract声明
     streaming=true / incremental=false / inputRequired=true / resume=true /
-    cancel=false / durable=false，因此只注册 basic、input_required、
-    resume 三个探针，绝不含cancel。
+    cancel=true / durable=false，因此注册 basic、input_required、resume、cancel。
     """
     return {
         "contract_snapshot_id": CONTRACT_SNAPSHOT_PLACEHOLDER,
@@ -63,6 +62,7 @@ def _runtime_registration(base_url: str) -> dict:
         "authentication": {"mode": "none", "credential_ref_id": None},
         "conformance": {
             "basic": {"input": CONFORMANCE_BASIC_INPUT},
+            "cancel": {"input": "我想请假"},
             "input_required": {"input": CONFORMANCE_INPUT_REQUIRED_INPUT},
             "resume": {
                 "start_input": CONFORMANCE_RESUME_START_INPUT,
@@ -89,7 +89,7 @@ def _markdown(contract: dict, registration: dict) -> str:
 - 协议：A2A 0.3.0（JSON-RPC over HTTP，SSE流式事件通道）
 - 交互能力（与运行时一致，不得漂移）：
   `streaming=true, incremental=false, inputRequired=true, resume=true,
-  cancel=false, durable=false`
+  cancel=true, durable=false`
 - 静态示例端点：`{runtime_endpoint}`（仅示例；live AgentCard只能HTTP discovery）
 
 ## 能力摘要（任务领域，非函数列表）
@@ -132,8 +132,9 @@ def _markdown(contract: dict, registration: dict) -> str:
 9. **Employee选择**：员工在SnowHarness中选择该Agent发起会话。
 10. **input-required/resume**：用 `conformance` 固定输入验证
     input-required 与 same task/context resume。
-11. **cancel=false预期**：Conformance不跑cancel探针；UI无Stop；
-    直接调用 `tasks/cancel` 会收到官方unsupported-operation错误。
+11. **取消**：Conformance验证 `tasks/cancel` 后同一任务为 canceled。
+    运行中取消须等本地工作退出、下游停止确认；等待补充时也可取消。
+    已经完成的业务副作用不会撤销。进程重启后不承诺恢复或取消旧任务。
 12. **bearer可选**：`HR_ASSISTANT_A2A_AUTH_MODE=bearer` 时必须配置
     `HR_ASSISTANT_A2A_BEARER_TOKEN`，并在SnowHarness用CredentialRef
     引用凭据；禁止把真实token写进任何工件或git。

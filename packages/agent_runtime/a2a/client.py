@@ -1,11 +1,13 @@
 """官方A2A客户端调用与通用Task/Artifact外壳校验。"""
 
 from dataclasses import dataclass
+import asyncio
 
 import httpx
 from a2a.client.card_resolver import A2ACardResolver
 from a2a.client.client_factory import ClientConfig, ClientFactory
-from a2a.types import DataPart, Message, Part, Role, Task, TextPart
+from a2a.types import DataPart, Message, Part, Role, Task, TaskIdParams, TaskQueryParams, TaskState, TextPart
+from packages.agent_runtime.a2a.cancellable_executor import TaskCancellationError
 
 from packages.agent_runtime.a2a.context import (
     A2ARequestContext,
@@ -31,6 +33,8 @@ class RemoteAgentSpec:
 class A2AInvocationResult:
     data: dict
     task_state: str
+    task_id: str
+    context_id: str
 
 
 class OfficialA2AClient:
@@ -55,11 +59,13 @@ class OfficialA2AClient:
         base_url: str,
         request: A2ARequestContext,
         spec: RemoteAgentSpec,
+        task_id: str | None = None,
     ) -> A2AInvocationResult:
         message = Message(
             role=Role.user,
             message_id=request.request_id,
             context_id=request.session_id,
+            task_id=task_id,
             metadata={
                 "request_id": request.request_id,
                 "user_id": request.user_id,
@@ -81,13 +87,46 @@ class OfficialA2AClient:
                 if card.name != spec.agent_name or card.version != spec.agent_version:
                     raise A2AInvocationError("a2a_contract_error")
                 client = ClientFactory(ClientConfig(
-                    streaming=False,
+                    streaming=True,
                     httpx_client=http,
                     supported_transports=["JSONRPC"],
                 )).create(card)
                 events = []
-                async for event in client.send_message(message):
-                    events.append(event)
+                latest_task = None
+                task_known = asyncio.Event()
+
+                async def consume():
+                    nonlocal latest_task
+                    try:
+                        async for event in client.send_message(message):
+                            events.append(event)
+                            if isinstance(event, tuple) and isinstance(event[0], Task):
+                                latest_task = event[0]
+                                task_known.set()
+                    finally:
+                        task_known.set()
+
+                receiving = asyncio.create_task(consume())
+                try:
+                    await asyncio.shield(receiving)
+                except asyncio.CancelledError:
+                    # 保持接收器存活，先获得远端task id，再取消远端而不只是断开HTTP。
+                    try:
+                        await asyncio.wait_for(task_known.wait(), self.timeout_seconds)
+                        if latest_task is None:
+                            raise TaskCancellationError()
+                        terminal = {TaskState.completed, TaskState.failed, TaskState.rejected, TaskState.canceled}
+                        if latest_task.status.state not in terminal:
+                            await self._stop_task(client, latest_task.id, latest_task.context_id,
+                                                  allowed_states=terminal)
+                    except Exception:
+                        raise TaskCancellationError() from None
+                    finally:
+                        receiving.cancel()
+                        await asyncio.gather(receiving, return_exceptions=True)
+                    raise
+        except TaskCancellationError:
+            raise
         except A2AInvocationError:
             raise
         except httpx.TimeoutException:
@@ -102,6 +141,33 @@ class OfficialA2AClient:
         if not tasks or not isinstance(tasks[-1], Task):
             raise A2AInvocationError("a2a_contract_error")
         return validate_task_result(tasks[-1], request=request, spec=spec)
+
+    @staticmethod
+    async def _stop_task(client, task_id: str, context_id: str, *, allowed_states: set):
+        try:
+            stopped = await client.cancel_task(TaskIdParams(id=task_id))
+        except Exception:
+            # ACK丢失或与完成竞争：查询原任务核实，不能把其他任务的终态当证据。
+            stopped = await client.get_task(TaskQueryParams(id=task_id))
+        if (stopped.id != task_id or stopped.context_id != context_id
+                or stopped.status.state not in allowed_states):
+            raise TaskCancellationError()
+
+    async def cancel_task(self, *, base_url: str, spec: RemoteAgentSpec,
+                          task_id: str, context_id: str) -> None:
+        api_key = self.runtime_api_keys.get(base_url.rstrip("/"))
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else None
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds, headers=headers) as http:
+                card = await A2ACardResolver(http, base_url).get_agent_card()
+                if card.name != spec.agent_name or card.version != spec.agent_version:
+                    raise TaskCancellationError()
+                client = ClientFactory(ClientConfig(httpx_client=http,
+                    supported_transports=["JSONRPC"])).create(card)
+                await self._stop_task(client, task_id, context_id,
+                                     allowed_states={TaskState.canceled})
+        except Exception:
+            raise TaskCancellationError() from None
 
 
 def validate_task_result(
@@ -143,4 +209,5 @@ def validate_task_result(
     }
     if state not in expected_states.get(data["status"], set()):
         raise A2AInvocationError("a2a_contract_error")
-    return A2AInvocationResult(data=data, task_state=state)
+    return A2AInvocationResult(data=data, task_state=state,
+                               task_id=task.id, context_id=task.context_id)

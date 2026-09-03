@@ -72,6 +72,8 @@ uv run pytest -q tests/eval/test_employee_data_eval.py -m employee_data_eval
 - [`docs/cloud-deployment-report.md`](docs/cloud-deployment-report.md)
 - [`deployment/resource-inventory.yaml`](deployment/resource-inventory.yaml)
 
-云端双轨清理前和清理后21条核心评测均为21/21。Consult和Employee Data最终使用`e827b01-stage1-six-fixes`，Orchestrator使用`e827b01-stage1-orchestrator-a2a-only`；拆分与A2A工程已收口。
+云端兼容语义回归（legacy semantic regression）21/21 通过；生产拓扑业务验收（Public A2A → Semantic Router → Local Leave / 远程 Consult / 远程 Employee Data）另见 `tests/e2e/production_topology/` suite。Consult 和 Employee Data 最终使用 `e827b01-stage1-six-fixes`，Orchestrator 使用 `e827b01-stage1-orchestrator-a2a-only`。
+
+> 说明：21/21 仅证明单进程兼容 Agent 能处理旧基线，不能证明生产拓扑业务迁移正确。只有 production-topology suite 全绿且真实模型/Viking/Gaia 验收通过后，才能写成"生产拓扑业务验收通过"。
 
 分享源码时只能运行`python -m scripts.source_archive <output.zip>`从Git已跟踪文件生成归档；Runtime镜像禁止使用全目录复制。详细门禁见[`deployment/README.md`](deployment/README.md)。

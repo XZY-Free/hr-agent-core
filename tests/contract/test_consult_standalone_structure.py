@@ -43,13 +43,15 @@ def test_consult_builder_has_no_employee_data_dependency_and_only_consult_tools(
         model_extra_config=extra_config_for("consult"),
     )
     assert consult_agent.name == "hr_consult_agent"
-    assert _tool_names(consult_agent) == ["kb_search", "parse_document"]
+    assert _tool_names(consult_agent) == [
+        "kb_search", "parse_document", "attendance_calculation", "request_user_input"
+    ]
     assert all(agent.name != "hr_consult_agent" for agent in root_agent.sub_agents)
 
 
 def test_consult_prompt_content_remains_frozen():
     assert hashlib.sha256(CONSULT_AGENT_PROMPT.encode()).hexdigest() == (
-        "713ad2073084969710e498f4ec4d9df3d75ddca668a3169ceccef8da763084b5"
+        "48f02dfc02591f72c191d7616ff00d1eeda5ec51c4124de06ca9780fc6a9e448"
     )
 
 

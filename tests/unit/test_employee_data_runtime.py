@@ -45,11 +45,11 @@ def _resolver():
 @pytest.mark.asyncio
 async def test_balance_uses_deterministic_tool_data_and_request_clock():
     runner = RecordingTurnRunner([EmployeeDataTurn(
-        tool_name="calc_annual_leave",
+        tool_name="get_leave_balances",
         data={
-            "annual_leave": {"mode": "flat", "quota": 5,
-                             "balance": [{"leave_name": "年休假", "remain": 4}]},
-            "employment": {"social_service_year": "6"},
+            "leave_balances": [{"leave_code": "A31", "leave_name": "年休假",
+                                "unit": "day", "effective_year": "2026",
+                                "total": 5, "used": 1, "remain": 4}],
         },
         source="stub",
     )])
@@ -65,23 +65,23 @@ async def test_balance_uses_deterministic_tool_data_and_request_clock():
 
     first = await runtime.run(_request("我还有几天年假", request_id="request-a"))
     runner.turns.append(EmployeeDataTurn(
-        tool_name="calc_annual_leave",
+        tool_name="get_leave_balances",
         data={
-            "annual_leave": {"mode": "flat", "quota": 5,
-                             "balance": [{"leave_name": "年休假", "remain": 4}]},
-            "employment": {"social_service_year": "6"},
+            "leave_balances": [{"leave_code": "A31", "leave_name": "年休假",
+                                "unit": "day", "effective_year": "2026",
+                                "total": 5, "used": 1, "remain": 4}],
         },
         source="stub",
     ))
     second = await runtime.run(_request("我还有几天年假", request_id="request-b"))
 
     assert first.status == "succeeded"
-    assert first.answer == "您的年休假余额为4天。"
+    assert first.answer == "您的年休假余额为4 天。"
     assert first.data_as_of == "2026-08-09T12:00:00+00:00"
     assert second.data_as_of == "2026-08-09T12:01:00+00:00"
     assert first.source == "stub"
     assert first.employee_ref and "EMP-001" not in first.employee_ref
-    assert runner.calls[0][2] == "leave_balance"
+    assert runner.calls[0][2] == "leave_balance_by_type"
 
 
 @pytest.mark.asyncio

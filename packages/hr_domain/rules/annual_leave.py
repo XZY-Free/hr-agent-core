@@ -33,6 +33,37 @@ def _is_leap(year: int) -> bool:
     return (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0)
 
 
+def compute_annual_leave(info_data: dict, balance_data, today: date) -> dict:
+    """纯折算：基于已解析的员工信息与年假余额计算档位。
+
+    算法与 calc_annual_leave 完全一致，供共享 GaiaProvider 消费；业务事实来自
+    服务端字段，不信任模型推断。
+    """
+    years = int(info_data["social_service_year"])
+    hire_month = int(info_data["hire_month"])
+    hire_day = int(info_data["hire_day"])
+
+    anniversary_this_year = date(today.year, hire_month, hire_day)
+    if today >= anniversary_this_year:
+        can_start_year = today.year - years
+    else:
+        can_start_year = today.year - years - 1
+    ten_year_year = can_start_year + 10   # 满 10 年的年份
+
+    if today.year == ten_year_year:
+        quota = split_year_quota(hire_month, hire_day, today.year)
+        return {
+            "mode": "split",
+            "before": quota["before"],
+            "after": quota["after"],
+            "anniversary": f"{hire_month:02d}-{hire_day:02d}",
+            "balance": balance_data,
+        }
+    if years < 10:
+        return {"mode": "flat", "quota": 5, "balance": balance_data}
+    return {"mode": "flat", "quota": 10, "balance": balance_data}
+
+
 def calc_annual_leave(tool_context) -> dict:
     """根据员工工龄折算年假天数并附年假余额。
 
@@ -45,33 +76,7 @@ def calc_annual_leave(tool_context) -> dict:
         return info  # 透传错误
 
     d = info["data"]
-    years = int(d["social_service_year"])
-    hire_month = int(d["hire_month"])
-    hire_day = int(d["hire_day"])
-
-    today = date.today()
-    anniversary_this_year = date(today.year, hire_month, hire_day)
-    if today >= anniversary_this_year:
-        # 今年纪念日已过 → 参工年份 = today.year - years
-        can_start_year = today.year - years
-    else:
-        # 今年纪念日未过 → 参工年份 = today.year - years - 1
-        can_start_year = today.year - years - 1
-    ten_year_year = can_start_year + 10   # 满 10 年的年份
-
-    # 附年假余额查询结果
     balance = get_leave_balance("年休假", tool_context)
     balance_data = balance.get("data") if balance.get("success") else None
 
-    if today.year == ten_year_year:
-        quota = split_year_quota(hire_month, hire_day, today.year)
-        return ok({
-            "mode": "split",
-            "before": quota["before"],
-            "after": quota["after"],
-            "anniversary": f"{hire_month:02d}-{hire_day:02d}",
-            "balance": balance_data,
-        })
-    if years < 10:
-        return ok({"mode": "flat", "quota": 5, "balance": balance_data})
-    return ok({"mode": "flat", "quota": 10, "balance": balance_data})
+    return ok(compute_annual_leave(d, balance_data, date.today()))

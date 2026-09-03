@@ -32,3 +32,27 @@ LEAVE_GENDER_MAP: dict[str, str] = {
 
 # 休息日班次 shiftCode 前缀（跳休判断用）
 REST_SHIFT_PREFIXES = ("OFF", "off_day", "defaultOFF")
+
+# 假期类型标准化别名（确定性规则，不由模型记忆）。仅口语→正式名。
+TYPE_ALIASES: dict[str, str] = {
+    "年假": "年休假",
+    "调休": "调休假",
+    "年休": "年休假",
+    "事假": "事假",
+    "病假": "病假",
+    "婚假": "婚假",
+    "陪产假": "陪产假",
+    "育儿假": "育儿假",
+    "丧假": "丧假",
+}
+
+
+def normalize_type_name(raw: str) -> str | None:
+    """把口语假期名标准化为 SKIP_RESTDAY_MAP 的正式名；未知返回 None。"""
+    candidate = raw.strip()
+    hit = TYPE_ALIASES.get(candidate)
+    if hit and hit in SKIP_RESTDAY_MAP:
+        return hit
+    if candidate in SKIP_RESTDAY_MAP:
+        return candidate
+    return None

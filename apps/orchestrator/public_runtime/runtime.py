@@ -5,10 +5,13 @@
 """
 
 import logging
-import re
 from datetime import datetime
 
 from apps.orchestrator.a2a.router import RemoteRouteResponse
+from apps.orchestrator.public_runtime.attachments import AttachmentResolutionError
+from packages.agent_runtime.a2a.cancellable_executor import TaskCancellationError
+from packages.hr_domain.documents.context import encode_document_context
+from packages.hr_domain.execution.context import bind_hr_execution_context
 from apps.orchestrator.public_runtime.identity_adapter import (
     ANONYMOUS_USER_ID,
     PublicIdentityAdapter,
@@ -102,13 +105,30 @@ class HrAssistantRuntime:
         remote_router,
         local_runner,
         identity_adapter: PublicIdentityAdapter | None = None,
+        hr_context_builder=None,
+        attachment_resolver=None,
     ):
         self.remote_router = remote_router
         self.local_runner = local_runner
         self.identity_adapter = identity_adapter or PublicIdentityAdapter()
+        # 装配好的 request-bound HR execution context 构建器。为 None 时
+        # 本地链不注入 HR 执行上下文（此时 gaia 业务工具 fail closed 为
+        # identity_unverified）。由 public_a2a.server 装配共享 resolver/provider。
+        self._hr_context_builder = hr_context_builder
+        self._attachment_resolver = attachment_resolver
         # 任务级本地续聊挂起键：(context_id, task_id)。仅当该键的本地链
         # 返回 input_required 时标记；终态（含失败）即清除，不做全局路由态。
         self._pending_local_continuations: set[tuple[str, str]] = set()
+        self._pending_remote_users: dict[tuple[str, str], str] = {}
+
+    async def cancel_pending(self, context_id: str, task_id: str) -> None:
+        key = (context_id, task_id)
+        user_id = self._pending_remote_users.get(key)
+        if user_id is not None:
+            await self.remote_router.cancel_pending(user_id=user_id,
+                session_id=context_id, task_id=task_id)
+            self._pending_remote_users.pop(key, None)
+        self._pending_local_continuations.discard(key)
 
     async def invoke(self, payload: dict) -> HrAssistantResult:
         try:
@@ -127,6 +147,10 @@ class HrAssistantRuntime:
             request.execution_subject
         )
         message = request.normalized_message()
+        # 附件解析：能解析则安全解析，不能解析则明确失败，绝不静默忽略。
+        attachment_err, attachment_doc_context = self._resolve_attachments(request)
+        if attachment_err is not None:
+            return attachment_err
         # contextId ↔ HR Agent 连续会话（session_id）。
         session_id = request.context_id
         # 同一 (context_id, task_id) 的本地挂起续聊：跳过远程路由，
@@ -143,9 +167,15 @@ class HrAssistantRuntime:
             )
 
         remote = await self._invoke_remote(
-            user_id=user_id, session_id=session_id, message=message
+            user_id=user_id, session_id=session_id, message=message, task_id=request.task_id,
+            attachment_context_summary=attachment_doc_context,
         )
         if remote is not None:
+            if continuation_key is not None:
+                if remote.status == "need_more_information":
+                    self._pending_remote_users[continuation_key] = user_id
+                else:
+                    self._pending_remote_users.pop(continuation_key, None)
             return _map_remote(remote, request=request)
         return await self._invoke_local(
             request=request,
@@ -161,19 +191,103 @@ class HrAssistantRuntime:
             return (request.context_id, request.task_id)
         return None
 
+    def _resolve_attachments(
+        self, request: HrAssistantRequest
+    ) -> tuple[HrAssistantResult | None, str | None]:
+        """解析附件引用，返回 (错误结果 | None, 文档上下文摘要 | None)。
+
+        - 无附件 → (None, None)；
+        - 无 resolver / 解析失败 → 明确错误（不静默忽略、不假装已读取）；
+        - 解析成功 → 构造 DocumentContext 摘要（encode_document_context）供 Consult 读取；
+        - 只上传附件不问问题 → needs_clarification。
+        """
+        references = request.context.attachment_references
+        if not references:
+            return None, None
+        if self._attachment_resolver is None:
+            return self._attachment_error(
+                request, "attachment_not_resolvable",
+                "当前附件引用暂时无法读取，请提供可访问的文档链接或使用已支持的附件来源。",
+            ), None
+        try:
+            resolved = self._attachment_resolver.resolve_all(references)
+        except AttachmentResolutionError as exc:
+            return self._attachment_error(request, exc.error_code, exc.message), None
+        if not request.normalized_message():
+            return self._attachment_error(
+                request, "needs_clarification",
+                "您上传了附件，请说明想了解的具体问题。",
+            ), None
+        summary = self._attachment_summary(resolved)
+        return None, summary
+
+    @staticmethod
+    def _attachment_summary(resolved) -> str | None:
+        """把可安全消费的附件编码为 DocumentContext 摘要。
+
+        仅处理带合法 http/https URL 的附件（DocumentContext 强校验 URL）。已解析出
+        安全文本但无 canonical URL 的附件不会产生文档上下文（不失真、不伪造 URL）。
+        """
+        for attachment in resolved:
+            url = attachment.url
+            if url and url.startswith(("http://", "https://")):
+                content = attachment.text or "附件待解析"
+                return encode_document_context({"url": url, "content": content[:30000]})
+        return None
+
+    @staticmethod
+    def _attachment_error(request, error_code: str, message: str) -> HrAssistantResult:
+        return HrAssistantResult(
+            request_id=request.request_id,
+            status="failed",
+            answer=message,
+            result_type="attachment",
+            error_code=error_code,
+            retryable=False,
+        )
+
     async def _invoke_remote(
-        self, *, user_id: str, session_id: str, message: str
+        self, *, user_id: str, session_id: str, message: str, task_id: str | None,
+        attachment_context_summary: str | None = None,
     ) -> RemoteRouteResponse | None:
         payload = {
             "user_id": user_id,
             "session_id": session_id,
             "new_message": {"parts": [{"text": message}]},
+            "task_id": task_id,
         }
         try:
-            return await self.remote_router.route(payload)
+            return await self.remote_router.route(
+                payload, attachment_context_summary=attachment_context_summary
+            )
+        except TaskCancellationError:
+            raise
         except Exception:
             logger.exception("public_runtime remote route error")
             return None
+
+    async def _run_local_bound(
+        self, *, user_id: str, session_id: str, headed: str, request: HrAssistantRequest
+    ):
+        """在 request-scoped HR execution context 下运行本地链。
+
+        有装配好的 builder 时绑定共享身份/Gaia 上下文；无 builder 时直接运行
+        （此时 gaia 业务工具 fail closed 为 identity_unverified）。同一请求内
+        的工具调用共享一次绑定，返回后即清理，不跨请求继承。
+        """
+        if self._hr_context_builder is None:
+            return await self.local_runner.run(
+                messages=headed, user_id=user_id, session_id=session_id
+            )
+        ctx = self._hr_context_builder(
+            internal_user_id=user_id,
+            request_id=request.request_id,
+            context_id=request.context_id,
+        )
+        with bind_hr_execution_context(ctx):
+            return await self.local_runner.run(
+                messages=headed, user_id=user_id, session_id=session_id
+            )
 
     async def _invoke_local(
         self,
@@ -190,8 +304,11 @@ class HrAssistantRuntime:
             + request.normalized_message()
         )
         try:
-            answer = await self.local_runner.run(
-                messages=headed, user_id=user_id, session_id=session_id
+            turn = await self._run_local_bound(
+                user_id=user_id,
+                session_id=session_id,
+                headed=headed,
+                request=request,
             )
         except Exception:
             logger.exception(
@@ -205,50 +322,15 @@ class HrAssistantRuntime:
                 answer="智能体暂时无法处理，请稍后重试。",
                 error_code="failed",
             )
-        answer_text = str(answer or "")
-        if _looks_like_missing_info(answer_text):
+        if turn.input_question is not None:
             if continuation_key is not None:
                 self._pending_local_continuations.add(continuation_key)
             return input_required(
-                request_id=request.request_id, answer=answer_text
+                request_id=request.request_id, answer=turn.input_question
             )
         # 到达终态：清除挂起键，后续消息恢复正常路由。
         if continuation_key is not None:
             self._pending_local_continuations.discard(continuation_key)
         return completed(
-            request_id=request.request_id, answer=answer_text
+            request_id=request.request_id, answer=turn.answer
         )
-
-
-# 当前本地 Runner 返回自然语言而非业务状态。识别明确追问和确认，
-# 不把问号当作等待输入的必要条件，也不将一般制度说明中的槽位词当追问。
-_MISSING_INFO_KEYWORDS = (
-    "假期",
-    "假期类型",
-    "哪种假",
-    "什么假",
-    "日期",
-    "哪天",
-    "开始时间",
-    "时长",
-    "多长时间",
-    "几天",
-    "事由",
-    "请假原因",
-)
-
-_INPUT_REQUEST = re.compile(
-    r"请(?:您|你)?(?:问|提供|补充|告知|告诉)|告诉我|告知我|"
-    r"(?:还需|需要)(?:您|你)|麻烦(?:您|你)?|"
-    r"哪天|哪种|什么|几天|多久|多长"
-)
-_CONFIRMATION_REQUEST = re.compile(r"请(?:您|你)?确认|是否确认|确认(?:无误)?后")
-
-
-def _looks_like_missing_info(answer: str) -> bool:
-    if _CONFIRMATION_REQUEST.search(answer):
-        return True
-    return (
-        any(keyword in answer for keyword in _MISSING_INFO_KEYWORDS)
-        and bool(_INPUT_REQUEST.search(answer))
-    )

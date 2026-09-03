@@ -23,4 +23,5 @@ def test_consult_agent_basic():
 
 def test_consult_agent_tools():
     names = _tool_names(consult_agent)
-    assert names == {"kb_search", "parse_document"}
+    assert names == {"kb_search", "parse_document", "attendance_calculation",
+                     "request_user_input"}

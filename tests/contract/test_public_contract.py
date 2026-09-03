@@ -80,7 +80,7 @@ def test_interaction_flags_are_honest():
     assert interaction["streaming_transport"] is STREAMING_TRANSPORT is True
     assert interaction["incremental_content"] is INCREMENTAL_CONTENT is False
     assert interaction["input_required"] is INPUT_REQUIRED is True
-    assert interaction["cancel"] is CANCEL is False
+    assert interaction["cancel"] is CANCEL is True
     assert (
         interaction["durable_task_recovery"] is DURABLE_TASK_RECOVERY is False
     )
@@ -153,13 +153,12 @@ def test_validator_catches_leak_and_toolish_capability():
     assert "capability_set_mismatch" in errors
 
 
-def test_cancel_and_durable_recovery_not_claimed_without_real_impl():
-    """批次5审计结论：veADK Runner无协作取消API，底层无法真实中断；
-    TaskStore为InMemoryTaskStore。二者未真实实现前合同不得宣称支持。"""
+def test_cancel_supported_but_durable_recovery_not_claimed():
+    """取消已实现并单独测试；进程内TaskStore不能宣称持久恢复。"""
     from apps.orchestrator.public_a2a.card import build_agent_card
 
     contract = build_agent_contract()
-    assert contract["interaction"]["cancel"] is False
+    assert contract["interaction"]["cancel"] is True
     assert contract["interaction"]["durable_task_recovery"] is False
 
     card = build_agent_card("https://hr-assistant.example.invalid")

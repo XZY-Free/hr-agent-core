@@ -48,6 +48,9 @@ class ConsultA2AResult(BaseModel):
     agent_name: Literal["hr-consult-agent"] = AGENT_NAME
     agent_version: Literal["1.0.0"] = AGENT_VERSION
     error_code: str | None = None
+    # 考勤量化计算证据（非敏感）：question_category=attendance_calculation 时，
+    # 结果必须可验证 calculator 被调用且数字与 ToolResult 一致，不允许模型新增金额。
+    calculation: dict | None = None
 
 
 def parse_consult_request(message: Message | None) -> ConsultA2ARequest:

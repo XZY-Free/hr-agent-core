@@ -28,7 +28,7 @@ def _tool_names(agent) -> list[str]:
     return [getattr(tool, "__name__", getattr(tool, "name", "")) for tool in agent.tools]
 
 
-def test_employee_data_agent_has_frozen_name_and_only_two_read_tools():
+def test_employee_data_agent_has_frozen_name_and_only_read_tools():
     assert set(inspect.signature(build_employee_data_agent).parameters) == {
         "model_name",
         "model_extra_config",
@@ -38,7 +38,10 @@ def test_employee_data_agent_has_frozen_name_and_only_two_read_tools():
         model_extra_config={"extra_body": {"thinking": {"type": "disabled"}}},
     )
     assert agent.name == "hr_employee_data_agent"
-    assert _tool_names(agent) == ["calc_annual_leave", "get_medical_period"]
+    # WP-03：恢复本人各假种余额能力，加入 get_leave_balances（仍只读）。
+    assert _tool_names(agent) == [
+        "calc_annual_leave", "get_medical_period", "get_leave_balances"
+    ]
     assert not any(word in name.lower() for name in _tool_names(agent)
                    for word in ("submit", "update", "delete", "write"))
 

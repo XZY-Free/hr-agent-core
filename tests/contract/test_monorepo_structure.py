@@ -141,7 +141,7 @@ def test_orchestrator_keeps_only_leave_and_page_jump_local():
         getattr(tool, "__name__", getattr(tool, "name", ""))
         for tool in application.root_agent.tools
     ]
-    assert tool_names == ["page_jump"]
+    assert tool_names == ["page_jump", "request_user_input"]
     assert [agent.name for agent in application.root_agent.sub_agents] == ["leave_agent"]
     assert application.remote_router is not None
 
@@ -170,25 +170,26 @@ def test_agent_tools_and_prompt_content_are_frozen():
         getattr(tool, "__name__", getattr(tool, "name", ""))
         for tool in value.tools
     ]
-    assert tool_names(compatibility.root_agent) == ["page_jump"]
+    assert tool_names(compatibility.root_agent) == ["page_jump", "request_user_input"]
     assert tool_names(compatibility.leave_agent) == [
-        "get_leave_permissions", "get_leave_balance", "get_schedule", "submit_leave"
+        "get_leave_permissions", "get_leave_balance", "get_schedule", "submit_leave", "request_user_input"
     ]
 
     prompts = {
         "apps.orchestrator.prompts": (
             "MAIN_AGENT_PROMPT",
-            # 批次2公共契约化：新增【执行上下文】可信日期时间说明行。
-            "70b50b114ddda39558fdce917319365b31d53ef676c422bd3b563777ecd8c682",
+            # WP-05：删除 root 本地查余额/医疗期的虚假工具宣称。
+            "903887df2bd67310011588aceb8d9d290010bf956303b57e99185278bda8287d",
         ),
         "apps.orchestrator.local_leave.prompts": (
             "LEAVE_AGENT_PROMPT",
-            # 批次2公共契约化：新增【执行上下文】可信日期时间说明行。
-            "a77fbbfbe086cc5e246d7ba607950d6895f44c9cb604d0baa562a846424e54e5",
+            # WP-02：删除"用户不说则填个人事务"、删除 0.5 天强转。
+            "96e49eeb747c39ae2bf11116afb781ff247823e1c03b1b595d2cae94cd96142c",
         ),
         "apps.consult_agent.prompts": (
             "CONSULT_AGENT_PROMPT",
-            "713ad2073084969710e498f4ec4d9df3d75ddca668a3169ceccef8da763084b5",
+            # WP-03/04：本人数据职责去重 + 考勤计算走 attendance_calculation。
+            "48f02dfc02591f72c191d7616ff00d1eeda5ec51c4124de06ca9780fc6a9e448",
         ),
     }
     for module_name, (attribute, expected_hash) in prompts.items():

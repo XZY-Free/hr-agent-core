@@ -8,6 +8,7 @@ from apps.orchestrator.callbacks.jump_marker import jump_marker_callback
 from apps.orchestrator.prompts import MAIN_AGENT_PROMPT
 from apps.orchestrator.routing.page_jump import page_jump
 from packages.hr_domain.constants.phrases import PHRASES
+from packages.agent_runtime.user_input import INPUT_REQUEST_INSTRUCTION, request_user_input
 
 
 def build_orchestrator(
@@ -24,8 +25,8 @@ def build_orchestrator(
         model_name=model_name,
         model_extra_config=model_extra_config,
         description="人力 AI 助手入口：考勤请假分发、查询、页面跳转",
-        instruction=instruction,
-        tools=[page_jump],
+        instruction=instruction + INPUT_REQUEST_INSTRUCTION,
+        tools=[page_jump, request_user_input],
         sub_agents=[leave_agent],
         after_model_callback=jump_marker_callback,
     )

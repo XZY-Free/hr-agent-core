@@ -73,7 +73,9 @@ async def test_knowledge_success_preserves_scope_source_and_zero_score():
 
 @pytest.mark.asyncio
 async def test_missing_childcare_province_requires_information_but_keeps_session_turn():
-    runner = RecordingTurnRunner(ConsultTurn(answer="请问您所在的省份是哪里？"))
+    runner = RecordingTurnRunner(ConsultTurn(
+        answer="", input_question="请问您所在的省份是哪里？",
+    ))
     runtime = ConsultRuntime(turn_runner=runner)
 
     result = await runtime.run(_request("育儿假有几天"))
@@ -81,6 +83,19 @@ async def test_missing_childcare_province_requires_information_but_keeps_session
     assert result.status == "need_more_information"
     assert result.question_category == "childcare_policy"
     assert len(runner.requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", ["深圳育儿假", "育儿假有几天", "你好"])
+async def test_answer_without_explicit_input_request_never_opens_form(message):
+    runner = RecordingTurnRunner(ConsultTurn(
+        answer="已经回答了您的问题。您可能还想了解：申请材料有哪些？",
+        tool_names=["kb_search"],
+        knowledge_scope="childcare",
+        sources=[{"source": "政策", "score": 0.8}],
+    ))
+    result = await ConsultRuntime(turn_runner=runner).run(_request(message))
+    assert result.status == "succeeded"
 
 
 @pytest.mark.asyncio

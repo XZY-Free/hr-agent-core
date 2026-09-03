@@ -1,0 +1,66 @@
+package: hr-agent-remediation-package-2026-09-02
+baseline:
+  repository: XZY-Free/hr-agent-core
+  branch: main
+  commit: 72bb3b6a7216b32a6a382e2faeae036ea7a67ee1
+scope:
+  modify_repository_only: hr-agent-core
+  modify_snowharness: false
+  include_fake_implementation_remediation: false
+execution_order:
+- id: WP-01
+  title: 身份与Gaia执行上下文
+  document: 01-身份与Gaia执行上下文整改.md
+  depends_on: []
+- id: WP-02
+  title: 请假状态模型与确定性规则引擎
+  document: 02-请假状态模型与确定性规则引擎整改.md
+  depends_on:
+  - WP-01
+- id: WP-03
+  title: Employee Data本人数据能力恢复
+  document: 03-本人数据能力恢复整改.md
+  depends_on:
+  - WP-01
+  - WP-02
+- id: WP-04
+  title: Consult考勤量化计算能力
+  document: 04-考勤量化计算能力整改.md
+  depends_on:
+  - WP-03
+- id: WP-05
+  title: 语义路由与会话续接
+  document: 05-语义路由与会话续接整改.md
+  depends_on:
+  - WP-02
+  - WP-03
+  - WP-04
+- id: WP-06
+  title: 公共上下文与附件适配
+  document: 06-公共上下文与附件适配整改.md
+  depends_on:
+  - WP-05
+- id: WP-07
+  title: 生产拓扑测试与业务验收
+  document: 07-生产拓扑测试与业务验收整改.md
+  depends_on:
+  - WP-01
+  - WP-02
+  - WP-03
+  - WP-04
+  - WP-05
+  - WP-06
+hard_guards:
+- Do not modify SnowHarness
+- Do not re-audit or redesign the package
+- Do not implement page_jump backend business JSON in this package
+- Do not implement handoff backend action in this package
+- Do not redesign final leave_support business action contract in this package
+- Do not treat LLM-derived transaction values as authoritative
+- Do not allow employee_id/corp_id/client_secret in public request
+- Do not keep parallel production identity authorities
+- Do not keep regex and semantic router as parallel ordinary business intent authorities
+- Do not silently fallback from real providers to stubs
+completion:
+  critical_matrix: 10-最终验收矩阵.md
+  all_critical_must_pass: true

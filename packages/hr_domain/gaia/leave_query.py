@@ -1,6 +1,19 @@
-"""假期余额 / 可申请假期类型查询工具。响应字段与旧工作流解析代码一致。"""
-from packages.hr_domain.schemas.tool_result import ok, err
-from packages.hr_domain.gaia.client import from_state
+"""假期余额 / 可申请假期类型查询工具。
+
+签名保留 tool_context（veADK 框架注入），但不再读取其中的凭据。员工身份由
+request-bound HR execution context 通过共享 Gaia Provider 可信解析；未映射返回
+identity_unverified，上下文/服务异常返回 gaia_error，绝不信任 session state 或
+模型提供的值，也绝不 fallback 到 user_id == employee_id。
+"""
+from packages.hr_domain.schemas.tool_result import err
+from packages.hr_domain.execution.context import (
+    require_employee_identity,
+    require_gaia_provider,
+)
+from packages.hr_domain.identity import IdentityResolutionError
+
+_GAIA_ERR = "gaia_error"
+_GAIA_ERR_MSG = "当前无法查询该业务，请联系管理员检查服务配置。"
 
 
 def get_leave_balance(leave_type: str, tool_context) -> dict:
@@ -9,38 +22,29 @@ def get_leave_balance(leave_type: str, tool_context) -> dict:
     Args:
         leave_type: 假期类型名称（如"年休假"）；传空字符串返回全部假期余额。
     """
-    state = tool_context.state
     try:
-        client = from_state(state)
-        body = client.request(
-            "prod", "POST",
-            f"/wfm4integration-wfm4appapi/api/v1/gaiastandard/getemployeeleaveremaindata/{state['corp_id']}",
-            json_body={"size": 10, "unitCode": "0", "employeeId": state["employeeId"],
-                       "page": 1, "isIncludeSubUnit": False, "startDate": "", "endDate": ""})
-        detail = body["details"]["employeeData"][0]["employeeDetailData"]
-    except Exception as e:
-        return err("gaia_error", f"查询假期余额失败：{e}")
-    items = [{"leave_name": d.get("leaveName"), "effective_year": d.get("effectiveYear"),
-              "total": d.get("leaveTotal", 0), "used": d.get("leaveUsed", 0),
-              "remain": d.get("leaveRemain", 0)} for d in detail]
-    if leave_type:
-        items = [i for i in items if i["leave_name"] == leave_type]
-    return ok(items)
+        employee_id = require_employee_identity().employee_id
+    except IdentityResolutionError:
+        return err("identity_unverified", "当前身份无法完成本人数据查询。")
+    except Exception:
+        return err(_GAIA_ERR, _GAIA_ERR_MSG)
+    try:
+        result = require_gaia_provider().leave_balance(leave_type, employee_id)
+    except Exception:
+        return err(_GAIA_ERR, _GAIA_ERR_MSG)
+    return result
 
 
 def get_leave_permissions(tool_context) -> dict:
     """查询员工可申请的假期类型列表（假期权限）。"""
-    state = tool_context.state
     try:
-        client = from_state(state)
-        body = client.request(
-            "sandbox", "POST",
-            f"/atd-webapi/api/gaiaStandard/leave/getEmployeeCanApplyLeaveType/{state['corp_id']}",
-            json_body={"empId": state["employeeId"]}, tenant=state["corp_id"])
-        if not body.get("result"):
-            return err("gaia_error", f"查询假期权限失败：{body.get('message')}")
-        data = [{"leave_code": x["LeaveCode"], "leave_type": x["LeaveType"]}
-                for x in body.get("data", [])]
-    except Exception as e:
-        return err("gaia_error", f"查询假期权限失败：{e}")
-    return ok(data)
+        employee_id = require_employee_identity().employee_id
+    except IdentityResolutionError:
+        return err("identity_unverified", "当前身份无法完成本人数据查询。")
+    except Exception:
+        return err(_GAIA_ERR, _GAIA_ERR_MSG)
+    try:
+        result = require_gaia_provider().leave_permissions(employee_id)
+    except Exception:
+        return err(_GAIA_ERR, _GAIA_ERR_MSG)
+    return result

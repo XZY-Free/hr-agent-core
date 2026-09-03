@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SnowHarness 页面联调测试清单 — hr-assistant</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1f2328;
+    --muted: #656d76;
+    --border: #d8dee4;
+    --accent: #0969da;
+    --accent-bg: #f0f7ff;
+    --good: #1a7f37;
+    --good-bg: #dafbe1;
+    --warn: #9a6700;
+    --warn-bg: #fff8c5;
+    --code-bg: #f6f8fa;
+    --table-head: #f6f8fa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 32px 20px 80px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin-bottom: 24px; font-size: 14px; }
+  h2 {
+    font-size: 18px;
+    margin: 40px 0 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .card h3 { margin: 0 0 8px; font-size: 15px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 14px;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--table-head); font-weight: 600; white-space: nowrap; }
+  code {
+    background: var(--code-bg);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    overflow-x: auto;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .badge {
+    display: inline-block;
+    border-radius: 12px;
+    padding: 2px 10px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .b-good { background: var(--good-bg); color: var(--good); }
+  .b-warn { background: var(--warn-bg); color: var(--warn); }
+  .b-accent { background: var(--accent-bg); color: var(--accent); }
+  .note {
+    background: var(--accent-bg);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+    padding: 10px 14px;
+    margin: 12px 0;
+    font-size: 14px;
+  }
+  .copy-btn {
+    float: right;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--accent);
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .copy-btn:hover { background: var(--accent-bg); }
+  .copy-btn.copied { color: var(--good); border-color: var(--good); }
+  ol.steps { padding-left: 22px; font-size: 14px; }
+  ol.steps li { margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>SnowHarness 页面联调测试清单</h1>
+  <div class="sub">Agent: <code>hr-assistant</code> v1.0.0 · 协议 A2A 0.3.0 · 生成自 <code>scripts/generate_snowharness_registration.py</code></div>
+
+  <div class="note">
+    <b>两个必须替换的占位符：</b>
+    <code>&lt;contract_snapshot_id-from-contract-import&gt;</code> → 导入合同后系统返回的真实 ID；
+    <code>runtime_endpoint</code> → live <code>card.url</code>（<code>GET &lt;public_url&gt;/.well-known/agent-card.json</code> 获取），两者规范化后必须一致。
+  </div>
+
+  <h2>① 页面注册所需信息</h2>
+  <table>
+    <tr><th>页面字段</th><th>填写内容</th><th>说明</th></tr>
+    <tr><td>Agent Name</td><td><code>hr-assistant</code></td><td>稳定身份</td></tr>
+    <tr><td>Version</td><td><code>1.0.0</code></td><td>公共版本</td></tr>
+    <tr><td>Runtime Endpoint</td><td><code>https://hr-assistant.example.invalid/</code></td><td>实际联调用 live <code>card.url</code></td></tr>
+    <tr><td>Auth Mode</td><td><code>none</code></td><td>bearer 需另配 CredentialRef</td></tr>
+    <tr><td>Credential Ref</td><td>（留空）</td><td>mode=none 不需要</td></tr>
+  </table>
+
+  <h2>② 导入合同（Register Contract）</h2>
+  <div class="card">
+    <h3>完整版 agent-contract.json（含 description，校验最稳）</h3>
+    <button class="copy-btn" onclick="copyText(this, 'contract-full')">复制</button>
+    <pre id="contract-full">{
+  "contract_version": "1.0.0",
+  "agent": {
+    "id": "hr-assistant",
+    "name": {
+      "zh-CN": "企业人力智能助手",
+      "en": "Enterprise HR Assistant"
+    },
+    "version": "1.0.0"
+  },
+  "capabilities": [
+    {
+      "key": "leave-and-attendance-service",
+      "name": { "zh-CN": "假勤与请假服务", "en": "Leave and Attendance Service" },
+      "description": {
+        "zh-CN": "请假申请、请假修改相关对话、补登、假期类型理解、日期与时长理解、排班/余额/资格校验后的办理、提交前确认、失败后的继续沟通。",
+        "en": "Leave requests, leave-modification conversations, retroactive entries, leave-type understanding, date and duration understanding, submission after schedule/balance/eligibility checks, pre-submit confirmation, and follow-up communication on failures."
+      }
+    },
+    {
+      "key": "employee-self-service",
+      "name": { "zh-CN": "员工本人信息服务", "en": "Employee Self-Service" },
+      "description": {
+        "zh-CN": "本人假期余额、本人医疗期、工龄信息、年假折算。",
+        "en": "The employee's own leave balance, medical period, service years, and annual-leave proration."
+      }
+    },
+    {
+      "key": "hr-policy-and-benefits-consultation",
+      "name": { "zh-CN": "人力制度与福利咨询", "en": "HR Policy and Benefits Consultation" },
+      "description": {
+        "zh-CN": "考勤制度、请假制度、入离职、试用期、薪酬、补贴、福利、地区差异类人力政策。",
+        "en": "Attendance rules, leave policies, onboarding and offboarding, probation, compensation, allowances, benefits, and region-specific HR policies."
+      }
+    },
+    {
+      "key": "hr-system-and-document-assistance",
+      "name": { "zh-CN": "人力系统与文档协助", "en": "HR System and Document Assistance" },
+      "description": {
+        "zh-CN": "人力系统操作说明、人力手册、人力文档问答、合法文档引用或附件辅助。",
+        "en": "HR system operation guides, HR handbook help, HR document Q&A, and lawful document-reference or attachment assistance."
+      }
+    }
+  ],
+  "invocation_context": [
+    {
+      "key": "execution_subject",
+      "name": { "zh-CN": "执行主体" },
+      "necessity": "preferred",
+      "description": {
+        "zh-CN": "SnowHarness本次执行所代表的可信调用者身份。制度咨询不一定需要身份；本人信息/请假办理需要身份。有可信身份且策略允许时尽量提供；没有身份时普通制度咨询仍可运行，本人数据或办理业务由智能体返回稳定身份缺失结果，不允许用户输入员工工号冒充可信身份。"
+      },
+      "applies_to": ["leave-and-attendance-service", "employee-self-service"]
+    },
+    {
+      "key": "timezone",
+      "name": { "zh-CN": "时区" },
+      "necessity": "preferred",
+      "description": { "zh-CN": "用于“明天”“后天”“下周三”等相对日期和跨时区日期理解。" }
+    },
+    {
+      "key": "current_datetime",
+      "name": { "zh-CN": "当前时间" },
+      "necessity": "preferred",
+      "description": {
+        "zh-CN": "本次执行的可信当前日期/时间。当前日期/时间在每次执行时确定，不在服务启动时冻结；如提供则优先使用。"
+      }
+    },
+    {
+      "key": "locale",
+      "name": { "zh-CN": "语言区域" },
+      "necessity": "preferred",
+      "description": { "zh-CN": "正式支持语言为zh-CN。" }
+    },
+    {
+      "key": "conversation_summary",
+      "name": { "zh-CN": "对话摘要" },
+      "necessity": "preferred",
+      "description": {
+        "zh-CN": "只在当前任务需要前文、平台有合法摘要、数据策略允许时提供。优先摘要/引用，不默认把整个会话历史全量复制给外部智能体。"
+      }
+    },
+    {
+      "key": "attachment_references",
+      "name": { "zh-CN": "附件引用" },
+      "necessity": "accepted",
+      "description": {
+        "zh-CN": "主要服务人力系统与文档协助。只在当前任务相关、调用方有权访问、合同允许、数据策略允许时发送引用；不默认把所有附件发送给智能体。"
+      },
+      "applies_to": ["hr-system-and-document-assistance"]
+    }
+  ],
+  "interaction": {
+    "streaming_transport": true,
+    "incremental_content": false,
+    "input_required": true,
+    "resume": true,
+    "cancel": false,
+    "durable_task_recovery": false,
+    "supported_locales": ["zh-CN"]
+  },
+  "result_contract": {
+    "fields": ["request_id", "status", "answer", "result_type", "data", "actions", "error_code", "retryable", "agent_name", "agent_version"],
+    "error_codes": ["identity_required", "identity_unverified", "input_required", "not_found", "rejected", "temporarily_unavailable", "failed", "cancelled", "contract_error"],
+    "notes": {
+      "zh-CN": "answer为人类可读主回答；result_type为结果类别；data为可选结构化数据；actions为可选宿主可执行动作（第一版无通用动作协议时为空）；error_code为稳定机器错误；retryable表示是否适合重试。"
+    }
+  }
+}</pre>
+  </div>
+
+  <h2>③ Conformance 探针测试输入</h2>
+  <table>
+    <tr><th>探针</th><th>输入</th><th>预期结果</th></tr>
+    <tr>
+      <td><span class="badge b-accent">basic</span></td>
+      <td><code>公司年休假的基本规则是什么？</code></td>
+      <td><span class="badge b-good">completed</span></td>
+    </tr>
+    <tr>
+      <td><span class="badge b-accent">input_required</span></td>
+      <td><code>我想请假</code></td>
+      <td><span class="badge b-warn">input-required</span>（等补充）</td>
+    </tr>
+    <tr>
+      <td rowspan="2"><span class="badge b-accent">resume</span></td>
+      <td>start: <code>我想请年假</code></td>
+      <td><span class="badge b-warn">input-required</span></td>
+    </tr>
+    <tr>
+      <td>resume: <code>明天一天</code></td>
+      <td>same task/context 继续 → <span class="badge b-good">completed</span></td>
+    </tr>
+  </table>
+  <div class="note">
+    <b>cancel=false 预期：</b>页面不显示 Stop；探针集合不含 cancel（合同 <code>cancel: false</code>）；
+    直接调 <code>tasks/cancel</code> 应收到 unsupported-operation 错误，且不得只是 CSS 隐藏。
+  </div>
+
+  <h2>④ 页面操作步骤（按序）</h2>
+  <ol class="steps">
+    <li><b>启动 Public A2A</b>：设置 <code>HR_ASSISTANT_A2A_HOST/PORT/PUBLIC_URL/AUTH_MODE</code> 并启动进程</li>
+    <li><b>health</b>：<code>GET &lt;public_url&gt;/health</code>，确认 status/agent/version/protocol_version/auth_mode</li>
+    <li><b>live AgentCard</b>：<code>GET &lt;public_url&gt;/.well-known/agent-card.json</code>，<code>card.url</code> 即 JSON-RPC 端点</li>
+    <li><b>Register Contract</b>：粘贴上方完整版合同 → 得到 <code>contract_snapshot_id</code></li>
+    <li><b>Create Revision</b> → <b>Register Runtime</b>（Endpoint / Auth）→ <b>Conformance</b>（填探针输入）→ <b>Publish</b></li>
+    <li><b>Route/Activation</b>：配置 Route / ExecutionBinding 与允许的 Invocation Context</li>
+    <li><b>Employee 会话</b>：新建会话 → Selector 选择发布的 Agent → 发 basic query → 验证 answer</li>
+    <li><b>input-required / resume</b>：缺信息任务 → 追问 → 补充 → same Invocation resume → completed</li>
+  </ol>
+
+  <h2>⑤ 验证要点（通过标准）</h2>
+  <table>
+    <tr><th>项</th><th>标准</th></tr>
+    <tr><td>Resume 证据</td><td>same Invocation、same Binding、same taskId/contextId、无 continuation Invocation、无 Binding 替换</td></tr>
+    <tr><td>Context 正确性</td><td>subject 来自 login Principal；resume 用 same subject；current_datetime 每次 fresh；internal ID 不外发</td></tr>
+    <tr><td>UI 错误</td><td>Provider 失败时员工看到稳定错误，不显示 raw JSON-RPC stack / bearer / 内部 endpoint 诊断</td></tr>
+    <tr><td>跨端一致性</td><td>Web start → A2A contextId → Desktop 同 Thread → 新 Turn 复用 contextId；新 Invocation taskId 必须不同</td></tr>
+    <tr><td>无自证报告</td><td>本包只提供工件与示例，不附带 Provider 生成的测试结论（passed/report/digest 均不应出现）</td></tr>
+  </table>
+</div>
+
+<script>
+function copyText(btn, id) {
+  const text = document.getElementById(id).innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = '已复制 ✓';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = '复制'; btn.classList.remove('copied'); }, 1500);
+  });
+}
+</script>
+</body>
+</html>

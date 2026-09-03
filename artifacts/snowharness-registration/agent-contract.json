@@ -128,7 +128,7 @@
     "incremental_content": false,
     "input_required": true,
     "resume": true,
-    "cancel": false,
+    "cancel": true,
     "durable_task_recovery": false,
     "supported_locales": [
       "zh-CN"

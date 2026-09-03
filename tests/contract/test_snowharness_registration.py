@@ -6,7 +6,7 @@ conformance报告。生成器是确定性产物构造，不是证据制造。
 
 阶段2新增：静态Card只以 example 形态存在（唯一live authority是HTTP
 discovery）；conformance schema是capability-driven的，HR contract
-cancel=false 因此绝不含cancel探针。
+cancel=true 因此必须包含cancel探针。
 """
 
 import importlib.util
@@ -117,8 +117,8 @@ def test_runtime_registration_matches_capability_driven_schema(generated):
         "credential_ref_id": None,
     }
     conformance = registration["conformance"]
-    # capability-driven：basic + input_required + resume，绝不含cancel。
-    assert set(conformance) == {"basic", "input_required", "resume"}
+    assert set(conformance) == {"basic", "input_required", "resume", "cancel"}
+    assert conformance["cancel"] == {"input": "我想请假"}
     assert conformance["basic"] == {"input": "公司年休假的基本规则是什么？"}
     assert conformance["input_required"] == {"input": "我想请假"}
     assert conformance["resume"] == {
@@ -134,7 +134,6 @@ def test_runtime_registration_matches_capability_driven_schema(generated):
         "report",
         "capabilities",
         "digest",
-        "cancel",
     ):
         assert forbidden not in serialized, forbidden
 
@@ -144,13 +143,13 @@ def test_conformance_schema_consistent_with_interaction_contract(generated):
     assert STREAMING_TRANSPORT is True
     assert INPUT_REQUIRED is True
     assert RESUME is True
-    assert CANCEL is False
+    assert CANCEL is True
     registration = json.loads(
         (generated / "runtime-registration.example.json").read_text(
             encoding="utf-8"
         )
     )
-    # cancel=false → 不注册cancel探针（上面已断言"cancel"不在序列化中）。
+    assert "cancel" in registration["conformance"]
 
 
 def test_markdown_is_operator_runbook(generated):
@@ -166,7 +165,7 @@ def test_markdown_is_operator_runbook(generated):
     assert "contract_snapshot_id" in markdown
     assert "AgentCard" in markdown
     assert "discovery" in markdown
-    assert "cancel=false" in markdown
+    assert "cancel=true" in markdown
     assert "bearer" in markdown  # runbook单独说明bearer配置，但无真实token
     # 不写SnowHarness内部源码路径。
     assert "src/" not in markdown
@@ -196,7 +195,7 @@ def test_contract_artifact_passes_validator_with_resume(generated):
     )
     assert validate_contract(contract) == []
     assert contract["interaction"]["resume"] is True
-    assert contract["interaction"]["cancel"] is False
+    assert contract["interaction"]["cancel"] is True
     # 与代码生成源一致，非手工维护副本。
     assert contract == build_agent_contract()
 

@@ -280,12 +280,12 @@ async def test_executor_resumes_current_task_instead_of_new_task(patch_updater, 
 
 
 @pytest.mark.asyncio
-async def test_cancel_returns_official_unsupported():
-    """cancel=false：tasks/cancel必须是官方unsupported-operation，不伪取消。"""
-    from a2a.types import UnsupportedOperationError
+async def test_unknown_execution_cannot_claim_cancellation():
+    """没有受控执行记录时不可虚报取消。"""
+    from a2a.types import TaskNotCancelableError
     from a2a.utils.errors import ServerError
 
     executor = HrAssistantExecutor(FakeRuntime(None))
     with pytest.raises(ServerError) as exc_info:
         await executor.cancel(_Ctx(_message("你好")), FakeQueue())
-    assert isinstance(exc_info.value.error, UnsupportedOperationError)
+    assert isinstance(exc_info.value.error, TaskNotCancelableError)

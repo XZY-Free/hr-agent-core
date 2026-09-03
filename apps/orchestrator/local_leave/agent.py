@@ -6,6 +6,7 @@ from veadk import Agent
 
 from apps.orchestrator.local_leave.prompts import LEAVE_AGENT_PROMPT
 from apps.orchestrator.local_leave.submit import submit_leave
+from packages.agent_runtime.user_input import INPUT_REQUEST_INSTRUCTION, request_user_input
 from packages.hr_domain.gaia.leave_query import (
     get_leave_balance,
     get_leave_permissions,
@@ -21,6 +22,6 @@ def build_leave_agent(*, model_name: str, model_extra_config: dict) -> Agent:
         model_name=model_name,
         model_extra_config=model_extra_config,
         description="请假办理专员：受理请假申请、补齐信息、校验并提交请假单",
-        instruction=LEAVE_AGENT_PROMPT.format(today=today),
-        tools=[get_leave_permissions, get_leave_balance, get_schedule, submit_leave],
+        instruction=LEAVE_AGENT_PROMPT.format(today=today) + INPUT_REQUEST_INSTRUCTION,
+        tools=[get_leave_permissions, get_leave_balance, get_schedule, submit_leave, request_user_input],
     )

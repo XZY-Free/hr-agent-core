@@ -22,9 +22,9 @@ def test_root_agent_keeps_only_leave_local():
     assert any(a is leave_agent for a in root_agent.sub_agents)
 
 
-def test_root_agent_keeps_only_page_jump_tool():
+def test_root_agent_has_page_jump_and_explicit_user_input_tool():
     names = _tool_names(root_agent)
-    assert names == {"page_jump"}
+    assert names == {"page_jump", "request_user_input"}
 
 
 def test_root_agent_mounts_jump_marker_callback():

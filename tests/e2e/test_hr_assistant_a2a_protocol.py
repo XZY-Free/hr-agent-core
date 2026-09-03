@@ -1,9 +1,13 @@
 """通过127.0.0.1真实网络验证顶层企业人力智能助手公共A2A契约（批次6）。
 
 录制runtime只验证协议层与公共合同；真实模型链路由评测与e2e覆盖。
+本文件定位为 protocol-only：只用录制 runtime 验证协议层，不承担业务迁移验收。
+业务迁移验收见 tests/e2e/production_topology/（真实 production builder + stub）。
 """
 
+import pytest
 import socket
+import asyncio
 import threading
 import time
 from uuid import uuid4
@@ -24,14 +28,9 @@ from apps.orchestrator.public_runtime.result import (
 )
 
 
-BASE_URL = "http://127.0.0.1:8100"
+pytestmark = pytest.mark.protocol
 
-_SETTINGS = PublicA2ASettings(
-    listen_host="127.0.0.1",
-    listen_port=8100,
-    public_base_url=BASE_URL,
-    auth_mode="none",
-)
+BASE_URL = ""
 
 
 class RecordingRuntime:
@@ -39,10 +38,20 @@ class RecordingRuntime:
 
     def __init__(self):
         self.payloads = []
+        self.stopped = threading.Event()
+
+    async def cancel_pending(self, context_id, task_id):
+        pass
 
     async def invoke(self, payload: dict):
         self.payloads.append(payload)
         message = payload["message"]
+        if message == "cancel-running-protocol":
+            self.stopped.clear()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                self.stopped.set()
         if "请假" in message or "请年假" in message:
             return input_required(
                 request_id=payload["request_id"],
@@ -58,20 +67,28 @@ class RecordingRuntime:
 
 @pytest.fixture(scope="module")
 def protocol_server():
+    global BASE_URL
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    BASE_URL = f"http://127.0.0.1:{port}"
+    settings = PublicA2ASettings(
+        listen_host="127.0.0.1", listen_port=port,
+        public_base_url=BASE_URL, auth_mode="none",
+    )
     runtime = RecordingRuntime()
     server = uvicorn.Server(uvicorn.Config(
-        build_public_a2a_app(runtime=runtime, settings=_SETTINGS),
+        build_public_a2a_app(runtime=runtime, settings=settings),
         host="127.0.0.1",
-        port=8100,
+        port=port,
         log_level="warning",
     ))
-    thread = threading.Thread(target=server.run, daemon=True)
+    thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]}, daemon=True)
     thread.start()
     deadline = time.time() + 10
     while time.time() < deadline:
-        with socket.socket() as sock:
-            if sock.connect_ex(("127.0.0.1", 8100)) == 0:
-                break
+        if server.started and thread.is_alive():
+            break
         time.sleep(0.05)
     else:
         server.should_exit = True
@@ -80,6 +97,7 @@ def protocol_server():
     yield runtime
     server.should_exit = True
     thread.join(timeout=10)
+    sock.close()
     assert not thread.is_alive()
 
 
@@ -146,6 +164,25 @@ async def test_top_level_card_discovered_by_official_resolver(protocol_server):
     for term in ("root_agent", "leave_agent", "hr-consult-agent",
                  "hr-employee-data-agent", "veadk", "agentkit", "gaia"):
         assert term not in serialized.lower(), term
+
+
+@pytest.mark.asyncio
+async def test_running_cancel_stops_work_and_both_http_stream_and_get_are_cancelled(protocol_server):
+    from a2a.types import TaskIdParams, TaskQueryParams, TaskState
+    async with httpx.AsyncClient(timeout=5) as http:
+        card = await A2ACardResolver(http, BASE_URL).get_agent_card()
+        client = ClientFactory(ClientConfig(streaming=True, httpx_client=http)).create(card)
+        stream = client.send_message(_message("cancel-running-protocol", context_id=str(uuid4())))
+        first = await anext(stream)
+        task_id = first[0].id
+        cancelled = await client.cancel_task(TaskIdParams(id=task_id))
+        assert cancelled.status.state == TaskState.canceled
+        assert protocol_server.stopped.is_set()
+        events = [event async for event in stream]
+        assert events[-1][0].status.state == TaskState.canceled
+        persisted = await client.get_task(TaskQueryParams(id=task_id))
+        assert persisted.status.state == TaskState.canceled
+        assert not persisted.artifacts
 
 
 @pytest.mark.asyncio
@@ -304,8 +341,8 @@ async def test_unknown_metadata_rejected_as_contract_error(protocol_server):
 
 
 @pytest.mark.asyncio
-async def test_direct_tasks_cancel_returns_official_unsupported(protocol_server):
-    """cancel=false：直接调用tasks/cancel必须是官方unsupported错误，不伪取消。"""
+async def test_completed_task_cannot_be_cancelled(protocol_server):
+    """已经完成的任务不可取消。"""
     _, events = await _official_call(_message("你好"))
     task = _final_task(events)
     async with httpx.AsyncClient() as http:
@@ -317,6 +354,23 @@ async def test_direct_tasks_cancel_returns_official_unsupported(protocol_server)
             from a2a.types import TaskIdParams
 
             await client.cancel_task(TaskIdParams(id=task.id))
+
+
+@pytest.mark.asyncio
+async def test_waiting_task_cancel_is_persisted_and_cannot_resume(protocol_server):
+    from a2a.types import TaskIdParams, TaskQueryParams
+    _, events = await _official_call(_message("我想请假", context_id=str(uuid4())))
+    task = _final_task(events)
+    async with httpx.AsyncClient() as http:
+        card = await A2ACardResolver(http, BASE_URL).get_agent_card()
+        client = ClientFactory(ClientConfig(
+            httpx_client=http, supported_transports=["JSONRPC"],
+        )).create(card)
+        canceled = await client.cancel_task(TaskIdParams(id=task.id))
+        assert canceled.status.state.value == "canceled"
+        assert (await client.get_task(TaskQueryParams(id=task.id))).status.state.value == "canceled"
+    with pytest.raises(A2AClientError):
+        await _official_call(_message("明天", context_id=task.context_id, task_id=task.id))
 
 
 @pytest.mark.asyncio

@@ -18,7 +18,7 @@ from apps.employee_data_agent.a2a.contract import (
     EmployeeDataA2AResult,
 )
 from apps.employee_data_agent.agent import build_employee_data_agent
-from apps.employee_data_agent.identity import (
+from packages.hr_domain.identity import (
     IdentityResolutionError,
     TrustedIdentity,
     TrustedIdentityResolver,
@@ -38,7 +38,10 @@ _CROSS_EMPLOYEE = re.compile(
     re.IGNORECASE,
 )
 _LEAVE_ACTION = re.compile(r"(?:我要|我想|帮我|明天|后天).{0,10}(?:请|申请|办理).{0,8}假")
-_POLICY = re.compile(r"制度|政策|规定|扣款|罚款|育儿假|餐补|系统.{0,4}(?:操作|怎么用)")
+_POLICY = re.compile(
+    r"制度|政策|规定|扣款|罚款|怎么请|流程|材料|需.{0,4}什么|"
+    r"餐补|系统.{0,4}(?:操作|怎么用)|(?:省份|省|市)[^,。]{0,6}(?:育儿假|假)"
+)
 
 
 @dataclass
@@ -191,7 +194,8 @@ class EmployeeDataRuntime:
             self._log(result, turn.tool_name or "none", started)
             return result
 
-        selected, answer, selection_error = _select_data(query_type, turn.data or {})
+        target = _extract_target(request.message) if query_type == "leave_balance_by_type" else None
+        selected, answer, selection_error = _select_data(query_type, turn.data or {}, target)
         if selection_error:
             status, retryable = _error_status(selection_error)
             result = self._result(
@@ -272,12 +276,41 @@ def _query_type(message: str) -> str | None:
         return "annual_leave_calculation"
     if any(word in message for word in ("参工", "工龄", "入职多久")):
         return "employment_info"
-    if "年假" in message or "年休假" in message or "假期余额" in message:
-        return "leave_balance"
+    # 省份/地区 + 假种 → 政策问句，不是本人余额；交由上层 Consult（此处不处理）。
+    if _is_province_policy(message):
+        return None
+    if _extract_target(message):
+        return "leave_balance_by_type"
+    if any(word in message for word in ("假期余额", "还有哪些假", "什么假", "所有假", "还剩多少")):
+        return "leave_balance_all"
+    if "年假" in message or "年休假" in message or "调休" in message or "育儿假" in message:
+        return "leave_balance_by_type"
     return None
 
 
-def _select_data(query_type: str, data: dict) -> tuple[dict | None, str, str | None]:
+def _is_province_policy(message: str) -> bool:
+    """地区/省份 + 假期 → 制度政策问句（如"四川育儿假有几天""上海病假规定"）。"""
+    return bool(re.search(
+        r"(?:四川|上海|北京|广东|浙江|江苏|重庆|天津|海南|全国)[^,。]{0,6}(?:育儿假|假期|病假|婚假)", message
+    ))
+
+
+def _extract_target(message: str) -> str | None:
+    """从消息提取目标假种（按问题意图，不给词），并做共享假种标准化。
+
+    "我还有几天育儿假" → 育儿假；省份政策问句已由 _is_province_policy 排除。
+    """
+    for phrase in ("育儿假", "年休假", "年假", "调休假", "调休", "病假",
+                   "事假", "全薪病假", "婚假", "陪产假"):
+        if phrase in message:
+            from packages.hr_domain.constants.leave_rules import normalize_type_name
+            return normalize_type_name(phrase) or phrase
+    return None
+
+
+def _select_data(
+    query_type: str, data: dict, target_leave_type: str | None = None
+) -> tuple[dict | None, str, str | None]:
     if query_type == "medical_period":
         value = data.get("medical_period")
         if not isinstance(value, dict) or "balance" not in value:
@@ -291,17 +324,16 @@ def _select_data(query_type: str, data: dict) -> tuple[dict | None, str, str | N
         months = value.get("social_service_month", "0")
         days = value.get("social_service_day", "0")
         return value, f"您的参工年限为{years}年{months}个月{days}天。", None
+    if query_type in ("leave_balance_all", "leave_balance_by_type"):
+        balances = data.get("leave_balances")
+        if not isinstance(balances, list):
+            return None, "", "internal_data_error"
+        if query_type == "leave_balance_by_type":
+            return _render_single_balance(balances, target_leave_type)
+        return _render_all_balances(balances)
     annual = data.get("annual_leave")
     if not isinstance(annual, dict):
         return None, "", "internal_data_error"
-    if query_type == "leave_balance":
-        balances = annual.get("balance")
-        if not isinstance(balances, list) or not balances:
-            return None, "", "employee_not_found"
-        row = next((item for item in balances if item.get("leave_name") == "年休假"), balances[0])
-        if "remain" not in row:
-            return None, "", "internal_data_error"
-        return {"leave_balance": row}, f"您的年休假余额为{row['remain']}天。", None
     if annual.get("mode") == "flat" and "quota" in annual:
         return data, f"您当前的年休假档位为{annual['quota']}天。", None
     if annual.get("mode") == "split" and {"before", "after"} <= set(annual):
@@ -310,6 +342,38 @@ def _select_data(query_type: str, data: dict) -> tuple[dict | None, str, str | N
             f"跨档后{annual['after']}天。"
         ), None
     return None, "", "internal_data_error"
+
+
+def _unit_label(unit: str | None) -> str:
+    return "小时" if (unit or "day") == "hour" else "天"
+
+
+def _render_single_balance(
+    balances: list[dict], target: str | None
+) -> tuple[dict | None, str, str | None]:
+    if not balances:
+        return None, "", "leave_balance_not_found"
+    # 优先精确匹配目标假种；缺失返回 not_found，绝不冒用第一行。
+    row = next((r for r in balances if r.get("leave_name") == target), None) if target else None
+    if row is None:
+        return None, "", "leave_balance_not_found"
+    if "remain" not in row:
+        return None, "", "internal_data_error"
+    unit = _unit_label(row.get("unit"))
+    answer = f"您的{row['leave_name']}余额为{row['remain']} {unit}。"
+    return {"leave_balance": row}, answer, None
+
+
+def _render_all_balances(balances: list[dict]) -> tuple[dict | None, str, str | None]:
+    if not balances:
+        return None, "", "leave_balance_not_found"
+    lines = []
+    for row in balances:
+        unit = _unit_label(row.get("unit"))
+        year = row.get("effective_year")
+        suffix = f"（{year}年）" if year else ""
+        lines.append(f"{row.get('leave_name')}：{row.get('remain')} {unit}{suffix}")
+    return {"leave_balances": balances}, "您的假期余额：" + "；".join(lines) + "。", None
 
 
 def _error_status(error_code: str) -> tuple[str, bool]:

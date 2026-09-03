@@ -59,6 +59,13 @@ class RemoteRouteResponse:
     error_code: str | None = None
 
 
+@dataclass(frozen=True)
+class RemoteContinuation:
+    target: RouteTarget
+    task_id: str
+    context_id: str
+
+
 class OrchestratorRemoteRouter:
     def __init__(
         self,
@@ -78,8 +85,23 @@ class OrchestratorRemoteRouter:
         self.context_summary_provider = context_summary_provider
         self.consult_url = consult_url
         self.employee_data_url = employee_data_url
+        # 公共task按任务隔离；旧HTTP入口无task时按其user/session连续对话。
+        self._continuations: dict[tuple[str, str, str | None], RemoteContinuation] = {}
 
-    async def route(self, payload: dict) -> RemoteRouteResponse | None:
+    async def cancel_pending(self, *, user_id: str, session_id: str, task_id: str) -> None:
+        key = (user_id, session_id, task_id)
+        pending = self._continuations.get(key)
+        if pending is None:
+            return
+        spec = CONSULT_SPEC if pending.target == RouteTarget.CONSULT else EMPLOYEE_SPEC
+        base_url = self.consult_url if pending.target == RouteTarget.CONSULT else self.employee_data_url
+        await self.client.cancel_task(base_url=base_url, spec=spec,
+            task_id=pending.task_id, context_id=pending.context_id)
+        self._continuations.pop(key, None)
+
+    async def route(
+        self, payload: dict, *, attachment_context_summary: str | None = None
+    ) -> RemoteRouteResponse | None:
         extracted = _extract_payload(payload)
         if extracted is None:
             return None
@@ -88,18 +110,27 @@ class OrchestratorRemoteRouter:
             user_id=user_id, session_id=session_id
         ):
             return None
-        target = self.route_table.decide(message, user_id=user_id, session_id=session_id)
+        key = (user_id, session_id, payload.get("task_id"))
+        pending = self._continuations.get(key)
+        target = pending.target if pending else self.route_table.decide(
+            message, user_id=user_id, session_id=session_id,
+            task_id=payload.get("task_id"),
+        )
         if target == RouteTarget.LOCAL:
             return None
         request_id = str(uuid4())
         context_summary = ""
         try:
-            if target == RouteTarget.CONSULT and self.context_summary_provider is not None:
-                context_summary = await self.context_summary_provider(
-                    user_id=user_id,
-                    session_id=session_id,
-                    message=message,
-                )
+            if target == RouteTarget.CONSULT:
+                # 附件文档上下文优先（独立 DocumentContext 编码，不混入普通 summary）。
+                if attachment_context_summary:
+                    context_summary = attachment_context_summary
+                elif self.context_summary_provider is not None:
+                    context_summary = await self.context_summary_provider(
+                        user_id=user_id,
+                        session_id=session_id,
+                        message=message,
+                    )
                 if not isinstance(context_summary, str) or contains_sensitive_data(
                     context_summary
                 ):
@@ -125,7 +156,8 @@ class OrchestratorRemoteRouter:
         base_url = self.consult_url if target == RouteTarget.CONSULT else self.employee_data_url
         started = time.perf_counter()
         try:
-            invoked = await self.client.invoke(base_url=base_url, request=request, spec=spec)
+            invoked = await self.client.invoke(base_url=base_url, request=request, spec=spec,
+                **({"task_id": pending.task_id} if pending else {}))
             data = invoked.data
             if contains_sensitive_data(data):
                 raise A2AInvocationError("a2a_security_error")
@@ -133,12 +165,19 @@ class OrchestratorRemoteRouter:
                 answer, status = _validate_consult(data, request.request_id)
             else:
                 answer, status = _validate_employee(data, request.request_id)
-            self.route_table.record_remote_status(
-                user_id=user_id,
-                session_id=session_id,
-                target=target,
-                status=status,
-            )
+            if status == "need_more_information":
+                self._continuations[key] = RemoteContinuation(target, invoked.task_id, invoked.context_id)
+                # 同步 continuation owner（guard 优先：补充消息回到原 owner，不重分类）。
+                self.route_table.record_remote_status(
+                    user_id=user_id, session_id=session_id, target=target,
+                    status=status, task_id=payload.get("task_id"),
+                )
+            else:
+                self._continuations.pop(key, None)
+                self.route_table.record_remote_status(
+                    user_id=user_id, session_id=session_id, target=target,
+                    status=status, task_id=payload.get("task_id"),
+                )
             response = RemoteRouteResponse(
                 answer=answer,
                 request_id=request.request_id,
@@ -213,11 +252,35 @@ def _validate_consult(data: dict, request_id: str) -> tuple[str, str]:
             raise A2AInvocationError("a2a_contract_error")
         if data.get("knowledge_scope") is not None and not sources:
             raise A2AInvocationError("a2a_contract_error")
+        if data.get("question_category") == "attendance_calculation":
+            _validate_consult_calculation(data)
     if status == "not_found":
         return "暂未查询到可靠制度，请联系HR或换个说法再问。", status
     if status in {"temporarily_unavailable", "failed"}:
         return "咨询服务暂时繁忙，请稍后重试。", status
     return data["answer"], status
+
+
+def _validate_consult_calculation(data: dict) -> None:
+    """attendance_calculation 结果必须带计算证据且数字与 answer 一致。"""
+    calc = data.get("calculation")
+    if not isinstance(calc, dict):
+        raise A2AInvocationError("a2a_contract_error")
+    answer = data.get("answer", "")
+    total_deduction = calc.get("total_deduction")
+    total_absence_days = calc.get("total_absence_days")
+    if not isinstance(total_deduction, (int, float)) or isinstance(total_deduction, bool):
+        raise A2AInvocationError("a2a_contract_error")
+    if not isinstance(total_absence_days, (int, float)) or isinstance(total_absence_days, bool):
+        raise A2AInvocationError("a2a_contract_error")
+    # answer 必须包含计算得出的金额与旷工天数（允许 0 值以"0"或"无"形式出现）。
+    deduction_text = str(total_deduction)
+    if total_deduction and deduction_text not in answer:
+        raise A2AInvocationError("a2a_contract_error")
+    if total_absence_days and str(total_absence_days) not in answer:
+        raise A2AInvocationError("a2a_contract_error")
+    if not isinstance(calc.get("records"), list):
+        raise A2AInvocationError("a2a_contract_error")
 
 
 def _validate_employee(data: dict, request_id: str) -> tuple[str, str]:
@@ -240,8 +303,16 @@ def _validate_employee_numbers(result: dict) -> None:
     answer = result["answer"]
     numbers = []
     try:
-        if query_type == "leave_balance":
-            numbers = [data["leave_balance"]["remain"]]
+        if query_type == "leave_balance_by_type":
+            row = data["leave_balance"]
+            numbers = [row["remain"]]
+            numbers.append(_unit_label(row.get("unit")))
+        elif query_type == "leave_balance_all":
+            rows = data["leave_balances"]
+            if not isinstance(rows, list) or not rows:
+                raise KeyError
+            for row in rows:
+                numbers.append(row["remain"])
         elif query_type == "medical_period":
             numbers = [data["balance"]]
         elif query_type == "employment_info":
@@ -254,5 +325,13 @@ def _validate_employee_numbers(result: dict) -> None:
             raise KeyError
     except (KeyError, TypeError):
         raise A2AInvocationError("a2a_contract_error") from None
-    if not all(str(value) in answer for value in numbers):
+    if not all(_serial(value) in answer for value in numbers):
         raise A2AInvocationError("a2a_contract_error")
+
+
+def _serial(value) -> str:
+    return str(value)
+
+
+def _unit_label(unit: str | None) -> str:
+    return "小时" if (unit or "day") == "hour" else "天"

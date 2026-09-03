@@ -74,7 +74,7 @@ class _RecordingClient:
             "agent_name": "hr-consult-agent",
             "agent_version": "1.0.0",
             "error_code": None,
-        }, task_state="completed")
+        }, task_state="completed", task_id="task-t", context_id="context-c")
 
 
 @pytest.mark.asyncio

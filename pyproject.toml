@@ -30,5 +30,7 @@ markers = [
     "employee_data_a2a: Employee Data官方A2A本地网络测试",
     "multi_agent_a2a: 三服务本地显式A2A闭环门禁",
     "a2a_eval: 根入口在a2a/a2a模式下的21条核心业务评测",
+    "protocol: 只用录制/协议层验证公共A2A契约，不承担业务迁移验收",
+    "production_topology: 生产拓扑stub E2E验收（Public A2A→Router→Local/A2A）",
 ]
 addopts = "-m 'not eval'"

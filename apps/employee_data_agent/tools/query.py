@@ -38,3 +38,12 @@ def get_medical_period(tool_context) -> dict:
     """查询当前员工医疗期额度、已用及余额。"""
     provider, employee_id = _binding()
     return provider.medical_period(employee_id).to_tool_result()
+
+
+def get_leave_balances(leave_type: str = "", tool_context=None) -> dict:
+    """查询当前员工本人各假种余额；leave_type 为空返回全部，否则按假种过滤。
+
+    数字与单位来自确定性 Provider，模型不得改写。
+    """
+    provider, employee_id = _binding()
+    return provider.leave_balances(employee_id, leave_type or None).to_tool_result()

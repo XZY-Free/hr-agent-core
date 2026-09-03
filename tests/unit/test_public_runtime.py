@@ -13,21 +13,25 @@ from apps.orchestrator.public_runtime.request import (
     PublicRequestError,
 )
 from apps.orchestrator.public_runtime.runtime import HrAssistantRuntime
+from packages.agent_runtime.user_input import TurnOutput
 
 
 class FakeRemoteRouter:
     def __init__(self, response=None):
         self.response = response
         self.calls = []
+        self.attachment_summaries = []
 
-    async def route(self, payload):
+    async def route(self, payload, *, attachment_context_summary=None):
         self.calls.append(payload)
+        self.attachment_summaries.append(attachment_context_summary)
         return self.response
 
 
 class FakeRunner:
-    def __init__(self, answer="好的", error=None):
+    def __init__(self, answer="好的", error=None, input_question=None):
         self.answer = answer
+        self.input_question = input_question
         self.error = error
         self.calls = []
 
@@ -37,7 +41,7 @@ class FakeRunner:
         )
         if self.error:
             raise self.error
-        return self.answer
+        return TurnOutput(answer=self.answer, input_question=self.input_question)
 
 
 def _payload(**overrides) -> dict:
@@ -49,6 +53,26 @@ def _payload(**overrides) -> dict:
     }
     payload.update(overrides)
     return payload
+
+
+def _supported_attachment_resolver():
+    from apps.orchestrator.public_runtime.attachments import (
+        AccessMode,
+        AttachmentResolver,
+        ResolvedAttachment,
+    )
+
+    def _resolve(ref):
+        return ResolvedAttachment(
+            canonical_reference=ref.reference_id,
+            resource_type=ref.resource_type,
+            media_type=ref.media_type,
+            display_name=ref.display_name,
+            access_mode=AccessMode.TEXT,
+            text="请假制度正文内容",
+        )
+
+    return AttachmentResolver(resolvers={"document": _resolve, "web_document": _resolve})
 
 
 @pytest.mark.asyncio
@@ -301,6 +325,68 @@ def test_parse_public_request_rejects_corp_id_context():
 
 
 @pytest.mark.asyncio
+async def test_local_path_binds_hr_execution_context_when_builder_configured():
+    """装配 hr_context_builder 时，本地链在 request-scoped HR context 下运行。"""
+    from packages.hr_domain.execution.context import current_hr_context
+
+    observed = {}
+    runner = FakeRunner(answer="好的。")
+    original_run = runner.run
+
+    async def _run(**kwargs):
+        observed["context"] = current_hr_context()
+        return await original_run(**kwargs)
+
+    runner.run = _run
+    runtime = HrAssistantRuntime(
+        remote_router=FakeRemoteRouter(None),
+        local_runner=runner,
+        hr_context_builder=lambda *, internal_user_id, request_id, context_id: (
+            type("Ctx", (), {
+                "internal_user_id": internal_user_id,
+                "request_id": request_id,
+                "context_id": context_id,
+            })()
+        ),
+    )
+    await runtime.invoke(
+        _payload(
+            message="我的年假余额还有多少？",
+            execution_subject={
+                "subject_id": "snow-user-1",
+                "subject_kind": "platform_user",
+            },
+        )
+    )
+
+    assert observed["context"] is not None
+    assert observed["context"].internal_user_id.startswith("snowharness-")
+    assert observed["context"].request_id == "req-1"
+    assert observed["context"].context_id == "ctx-1"
+
+
+@pytest.mark.asyncio
+async def test_local_path_without_builder_has_no_hr_context():
+    """未装配 builder 时（如仅远程/问候）本地链下 HR context 为空，不因问候失败。"""
+    from packages.hr_domain.execution.context import current_hr_context
+
+    observed = {}
+    runner = FakeRunner(answer="好的。")
+    original_run = runner.run
+
+    async def _run(**kwargs):
+        observed["context"] = current_hr_context()
+        return await original_run(**kwargs)
+
+    runner.run = _run
+    runtime = HrAssistantRuntime(
+        remote_router=FakeRemoteRouter(None), local_runner=runner
+    )
+    await runtime.invoke(_payload(message="你好"))
+    assert observed["context"] is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "answer,is_missing",
     [
@@ -312,18 +398,45 @@ def test_parse_public_request_rejects_corp_id_context():
         ("已整理好申请信息，请确认后再提交。", True),
         ("请假申请需要填写日期和时长。", False),
         ("开始日期为明天，时长一天，申请已提交。", False),
+        ("你好！我是你的人力AI助手，可以帮你处理请假申请、查询假期余额、打开考勤相关页面等事务，有需要随时告诉我哦～", False),
+        ("我能查询假期余额，有需要请告诉我。", False),
+        ("请假需要填写日期和事由。如需其他帮助，请告诉我。", False),
+        ("请问您想申请什么类型的假期？另外还需要您提供请假的开始日期、时长或结束日期，以及请假事由。", True),
         ("申请已提交：年休假 2026-08-26 全天 1 天。", False),
         ("已为您打开我的表单。", False),
     ],
 )
-async def test_local_missing_info_maps_to_input_required(answer, is_missing):
+async def test_local_explicit_input_request_maps_to_input_required(answer, is_missing):
     runtime = HrAssistantRuntime(
-        remote_router=FakeRemoteRouter(None), local_runner=FakeRunner(answer=answer)
+        remote_router=FakeRemoteRouter(None), local_runner=FakeRunner(
+            answer=answer, input_question=answer if is_missing else None,
+        )
     )
     result = await runtime.invoke(_payload(message="帮我请假"))
     assert (result.status == "input_required") is is_missing
     if is_missing:
         assert result.error_code == "input_required"
+    assert result.answer == answer
+
+
+@pytest.mark.asyncio
+async def test_question_text_alone_cannot_force_input_required():
+    runtime = HrAssistantRuntime(
+        remote_router=FakeRemoteRouter(None),
+        local_runner=FakeRunner(answer="申请时请告诉我日期？确认后提交。"),
+    )
+    assert (await runtime.invoke(_payload(message="你好"))).status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_explicit_input_request_without_keywords_is_preserved():
+    runtime = HrAssistantRuntime(
+        remote_router=FakeRemoteRouter(None),
+        local_runner=FakeRunner(input_question="您的诉求是"),
+    )
+    result = await runtime.invoke(_payload())
+    assert result.status == "input_required"
+    assert result.answer == "您的诉求是"
 
 
 class ScriptedRunner:
@@ -337,7 +450,8 @@ class ScriptedRunner:
         self.calls.append(
             {"messages": messages, "user_id": user_id, "session_id": session_id}
         )
-        return self.calls and self.answers[len(self.calls) - 1]
+        answer = self.answers[len(self.calls) - 1]
+        return answer if isinstance(answer, TurnOutput) else TurnOutput(answer=answer)
 
 
 class ScriptedRouter:
@@ -347,7 +461,7 @@ class ScriptedRouter:
         self.responses = list(responses)
         self.calls = []
 
-    async def route(self, payload):
+    async def route(self, payload, *, attachment_context_summary=None):
         self.calls.append(payload)
         if len(self.calls) > len(self.responses):
             # 超出脚本次数的调用是生产缺陷导致的额外路由，回落 None 转本地，
@@ -356,7 +470,7 @@ class ScriptedRouter:
         return self.responses[len(self.calls) - 1]
 
 
-_MISSING = "好的，请问假期类型和日期分别是什么？"
+_MISSING = TurnOutput(input_question="好的，请问假期类型和日期分别是什么？")
 
 
 def _consult_response(answer="这是咨询答复。"):
@@ -540,7 +654,8 @@ async def test_context_strict_schema_rejects_invalid(context):
 @pytest.mark.asyncio
 async def test_context_valid_values_accepted():
     runtime = HrAssistantRuntime(
-        remote_router=FakeRemoteRouter(None), local_runner=FakeRunner()
+        remote_router=FakeRemoteRouter(None), local_runner=FakeRunner(),
+        attachment_resolver=_supported_attachment_resolver(),
     )
     result = await runtime.invoke(
         _payload(
@@ -586,10 +701,12 @@ async def test_conversation_summary_isolated_from_user_text():
 async def test_attachment_references_not_dumped_into_prompt():
     runner = FakeRunner(answer="好的。")
     runtime = HrAssistantRuntime(
-        remote_router=FakeRemoteRouter(None), local_runner=runner
+        remote_router=FakeRemoteRouter(None), local_runner=runner,
+        attachment_resolver=_supported_attachment_resolver(),
     )
     await runtime.invoke(
         _payload(
+            message="这份文件说了什么",
             context={
                 "attachment_references": [
                     {"reference_id": "ref-1", "resource_type": "document"}
@@ -597,6 +714,7 @@ async def test_attachment_references_not_dumped_into_prompt():
             }
         )
     )
+    # 附件引用/内容不写进用户消息 prompt；附件走独立 doc context（经 remote Consult）。
     assert "ref-1" not in runner.calls[0]["messages"]
 
 

@@ -7,14 +7,15 @@
 import logging
 import time
 
-from a2a.server.agent_execution import AgentExecutor, RequestContext
+from a2a.server.agent_execution import RequestContext
 from a2a.server.events.event_queue import EventQueue
 from a2a.server.tasks.task_updater import TaskUpdater
-from a2a.types import InvalidParamsError, UnsupportedOperationError
+from a2a.types import InvalidParamsError, TaskState
 from a2a.utils import new_task
 from a2a.utils.errors import ServerError
 
 from packages.agent_runtime.a2a.artifact import structured_result_parts
+from packages.agent_runtime.a2a.cancellable_executor import CancellableExecutor
 
 
 logger = logging.getLogger(__name__)
@@ -71,11 +72,12 @@ def _extract_payload(context: RequestContext) -> dict:
     return payload
 
 
-class HrAssistantExecutor(AgentExecutor):
+class HrAssistantExecutor(CancellableExecutor):
     def __init__(self, runtime):
+        super().__init__()
         self.runtime = runtime
 
-    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+    async def execute_task(self, context: RequestContext, event_queue: EventQueue) -> TaskState:
         try:
             payload = _extract_payload(context)
         except PublicContractError as exc:
@@ -89,6 +91,7 @@ class HrAssistantExecutor(AgentExecutor):
             await event_queue.enqueue_event(task)
         updater = TaskUpdater(event_queue, task.id, task.context_id)
         payload["request_id"] = task.id
+        payload["task_id"] = task.id
         await updater.start_work()
         started = time.perf_counter()
         result = await self.runtime.invoke(payload)
@@ -107,15 +110,16 @@ class HrAssistantExecutor(AgentExecutor):
         )
         if result.status == "input_required":
             await updater.requires_input(final=True)
+            return TaskState.input_required
         elif result.status == "rejected":
             await updater.reject()
+            return TaskState.rejected
         elif result.status == "failed":
             await updater.failed()
+            return TaskState.failed
         else:
             await updater.complete()
+            return TaskState.completed
 
-    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
-        # 公共合同 cancel=false：底层veADK/Tool无法真实中断，禁止把Task
-        # 标成cancelled但业务仍在运行的伪取消。tasks/cancel 一律返回
-        # a2a-sdk官方unsupported-operation错误。
-        raise ServerError(error=UnsupportedOperationError())
+    async def task_cancelled(self, context):
+        await self.runtime.cancel_pending(context.context_id, context.task_id)

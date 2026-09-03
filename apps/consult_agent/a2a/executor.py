@@ -3,7 +3,8 @@
 import logging
 import time
 
-from a2a.server.agent_execution import AgentExecutor, RequestContext
+from a2a.server.agent_execution import RequestContext
+from packages.agent_runtime.a2a.cancellable_executor import CancellableExecutor
 from a2a.server.events.event_queue import EventQueue
 from a2a.server.tasks.task_updater import TaskUpdater
 from a2a.types import TaskState
@@ -22,11 +23,12 @@ from apps.consult_agent.a2a.contract import (
 logger = logging.getLogger(__name__)
 
 
-class ConsultAgentExecutor(AgentExecutor):
+class ConsultAgentExecutor(CancellableExecutor):
     def __init__(self, runtime):
+        super().__init__()
         self.runtime = runtime
 
-    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+    async def execute_task(self, context: RequestContext, event_queue: EventQueue) -> TaskState:
         try:
             request = parse_consult_request(context.message)
         except RequestContractError as exc:
@@ -64,15 +66,13 @@ class ConsultAgentExecutor(AgentExecutor):
         )
         if result.status == "need_more_information":
             await updater.requires_input(final=True)
+            return TaskState.input_required
         elif result.status == "rejected":
             await updater.reject()
+            return TaskState.rejected
         elif result.status in {"temporarily_unavailable", "failed"}:
             await updater.failed()
+            return TaskState.failed
         else:
             await updater.complete()
-
-    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
-        if not context.task_id or not context.context_id:
-            raise ServerError(error=InvalidParamsError(message="A2A任务字段无效"))
-        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
-        await updater.cancel()
+            return TaskState.completed

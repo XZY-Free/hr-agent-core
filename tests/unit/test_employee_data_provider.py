@@ -20,29 +20,27 @@ def test_stub_source_is_explicit_for_success_not_found_and_failure():
     assert provider.annual_profile("EMP-AUTH").source == "stub"
 
 
-def test_gaia_credentials_stay_in_ephemeral_internal_context(monkeypatch):
-    captured = []
+def test_gaia_credentials_stay_out_of_tool_result(monkeypatch):
+    """凭据只经共享 GaiaProvider 访问，绝不进入 ToolResult。
 
-    def fake_info(context):
-        captured.append(dict(context.state))
-        return {"success": True, "data": {
-            "social_service_year": "6", "social_service_month": "0",
-            "social_service_day": "0", "hire_month": "11", "hire_day": "03",
-        }}
+    WP-01：provider 不再伪造 session state，直接通过共享 GaiaProvider 读取数据。
+    """
+    captured = {"corp": None, "secret": None}
 
-    def fake_annual(context):
-        captured.append(dict(context.state))
-        return {"success": True, "data": {
-            "mode": "flat", "quota": 5, "balance": [],
-        }}
+    class FakeGaia:
+        def employee_info(self, employee_id):
+            return {"success": True, "data": {
+                "social_service_year": "6", "social_service_month": "0",
+                "social_service_day": "0", "hire_month": "11", "hire_day": "03",
+            }}
 
-    monkeypatch.setattr("apps.employee_data_agent.provider.get_employee_info", fake_info)
-    monkeypatch.setattr("apps.employee_data_agent.provider.gaia_annual_leave", fake_annual)
-    provider = GaiaEmployeeDataProvider(GaiaServerConfig(
-        corp_id="corp-secret",
-        client_secret="client-secret",
-        grant_type="client_credentials",
-    ))
+        def leave_balance(self, leave_type, employee_id):
+            return {"success": True, "data": [{
+                "leave_name": "年休假", "remain": 4, "total": 5, "used": 1,
+                "effective_year": "2026",
+            }]}
+
+    provider = GaiaEmployeeDataProvider(FakeGaia())
 
     result = provider.annual_profile("EMP-001").to_tool_result()
 
@@ -50,4 +48,6 @@ def test_gaia_credentials_stay_in_ephemeral_internal_context(monkeypatch):
     assert result["source"] == "gaia"
     assert "client-secret" not in str(result)
     assert "corp-secret" not in str(result)
-    assert captured and captured[0]["employeeId"] == "EMP-001"
+    assert "EMP-001" not in str(result)
+    assert result["data"]["annual_leave"]["mode"] == "flat"
+    assert result["data"]["annual_leave"]["quota"] == 5

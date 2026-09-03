@@ -98,7 +98,35 @@ def build_runtime():
     return HrAssistantRuntime(
         remote_router=application.remote_router,
         local_runner=_build_local_runner(application),
+        hr_context_builder=_build_hr_context_builder(),
     )
+
+
+def _build_hr_context_builder():
+    """装配共享 HR execution context 构建器；生产必需配置缺失即启动失败。
+
+    身份解析与 Gaia 凭据都来自服务端，不来自请求方 / session / 会话消息。
+    """
+    from packages.hr_domain.execution.context import build_hr_execution_context
+    from packages.hr_domain.gaia.config import gaia_server_config_from_env
+    from packages.hr_domain.gaia.provider import GaiaProvider
+    from packages.hr_domain.identity import TrustedIdentityResolver
+
+    resolver = TrustedIdentityResolver.from_env()
+    config = gaia_server_config_from_env()
+    provider = GaiaProvider(config)
+
+    def builder(*, internal_user_id: str, request_id: str, context_id: str):
+        return build_hr_execution_context(
+            internal_user_id=internal_user_id,
+            identity_resolver=resolver,
+            gaia_config=config,
+            gaia_provider=provider,
+            request_id=request_id,
+            context_id=context_id,
+        )
+
+    return builder
 
 
 def _load_application():
@@ -109,13 +137,14 @@ def _load_application():
 
 def _build_local_runner(application):
     from veadk import Runner
+    from apps.orchestrator.public_runtime.runner import PublicLocalRunner
 
     root = application.root_agent
-    return Runner(
+    return PublicLocalRunner(Runner(
         agent=root,
         app_name=root.name,
         short_term_memory=application.short_term_memory,
-    )
+    ))
 
 
 def run_local_server() -> None:

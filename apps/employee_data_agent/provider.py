@@ -3,12 +3,13 @@
 import json
 import os
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import Protocol
 
-from packages.hr_domain.gaia.employee_query import get_employee_info
-from packages.hr_domain.gaia.employee_query import get_medical_period as gaia_medical_period
-from packages.hr_domain.rules.annual_leave import calc_annual_leave as gaia_annual_leave
+from packages.hr_domain.gaia.config import (
+    gaia_server_config_from_env,
+)
+from packages.hr_domain.gaia.provider import GaiaProvider
+from packages.hr_domain.rules.annual_leave import compute_annual_leave
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ class ProviderResponse:
 
 
 class EmployeeDataProvider(Protocol):
+    def leave_balances(self, employee_id: str, leave_type: str | None = None) -> ProviderResponse: ...
     def annual_profile(self, employee_id: str) -> ProviderResponse: ...
     def medical_period(self, employee_id: str) -> ProviderResponse: ...
 
@@ -74,6 +76,22 @@ class StubEmployeeDataProvider:
             partial=bool(record.get("medical_partial")),
         )
 
+    def leave_balances(self, employee_id: str, leave_type: str | None = None) -> ProviderResponse:
+        record = self.records.get(employee_id)
+        if not record:
+            return ProviderResponse(source="stub", error_code="employee_not_found")
+        override = record.get("leave_error")
+        if override:
+            return ProviderResponse(source="stub", error_code=override)
+        rows = list(record.get("leave_balances", []))
+        if leave_type:
+            rows = [r for r in rows if r.get("leave_name") == leave_type]
+        return ProviderResponse(
+            data={"leave_balances": rows},
+            source="stub",
+            partial=bool(record.get("leave_partial")),
+        )
+
     @classmethod
     def from_env(cls) -> "StubEmployeeDataProvider":
         raw = os.getenv("EMPLOYEE_DATA_STUB_JSON", "")
@@ -88,24 +106,28 @@ class StubEmployeeDataProvider:
 
 @dataclass(frozen=True)
 class GaiaServerConfig:
+    """兼容别名：正式定义在 packages.hr_domain.gaia.config。"""
+
     corp_id: str
     client_secret: str
     grant_type: str
 
+    def to_shared(self):
+        from packages.hr_domain.gaia.config import GaiaServerConfig as Shared
+
+        return Shared(
+            corp_id=self.corp_id,
+            client_secret=self.client_secret,
+            grant_type=self.grant_type,
+            schedule_tenant=os.getenv("GAIA_SCHEDULE_TENANT", "").strip(),
+        )
+
 
 class GaiaEmployeeDataProvider:
-    """通过现有确定性Gaia工具读取当前员工数据。"""
+    """通过共享 GaiaProvider 读取当前员工数据；不伪造 session state。"""
 
-    def __init__(self, config: GaiaServerConfig):
-        self.config = config
-
-    def _context(self, employee_id: str):
-        return SimpleNamespace(state={
-            "employeeId": employee_id,
-            "corp_id": self.config.corp_id,
-            "client_secret": self.config.client_secret,
-            "grant_type": self.config.grant_type,
-        })
+    def __init__(self, provider: GaiaProvider):
+        self._gaia = provider
 
     @staticmethod
     def _error(result: dict) -> ProviderResponse:
@@ -119,25 +141,37 @@ class GaiaEmployeeDataProvider:
         return ProviderResponse(source="gaia", error_code=code)
 
     def annual_profile(self, employee_id: str) -> ProviderResponse:
-        context = self._context(employee_id)
-        info = get_employee_info(context)
+        info = self._gaia.employee_info(employee_id)
         if not info.get("success"):
             return self._error(info)
-        annual = gaia_annual_leave(context)
-        if not annual.get("success"):
-            return self._error(annual)
+        balance = self._gaia.leave_balance("年休假", employee_id)
+        balance_data = balance.get("data") if balance.get("success") else None
+        if not balance.get("success"):
+            return self._error(balance)
+        from datetime import date
+
+        annual = compute_annual_leave(info["data"], balance_data, date.today())
         return ProviderResponse(
-            data={"annual_leave": annual["data"], "employment": info["data"]},
+            data={"annual_leave": annual, "employment": info["data"]},
             source="gaia",
-            partial=annual["data"].get("balance") is None,
+            partial=annual.get("balance") is None,
         )
 
     def medical_period(self, employee_id: str) -> ProviderResponse:
-        result = gaia_medical_period(self._context(employee_id))
+        result = self._gaia.medical_period(employee_id)
         if not result.get("success"):
             return self._error(result)
         return ProviderResponse(
             data={"medical_period": result["data"]},
+            source="gaia",
+        )
+
+    def leave_balances(self, employee_id: str, leave_type: str | None = None) -> ProviderResponse:
+        result = self._gaia.leave_balance(leave_type or "", employee_id)
+        if not result.get("success"):
+            return self._error(result)
+        return ProviderResponse(
+            data={"leave_balances": result["data"]},
             source="gaia",
         )
 
@@ -148,11 +182,8 @@ def provider_from_env() -> EmployeeDataProvider:
         return StubEmployeeDataProvider.from_env()
     if backend != "gaia":
         raise RuntimeError("EMPLOYEE_DATA_BACKEND仅支持gaia或stub")
-    values = {
-        "corp_id": os.getenv("GAIA_CORP_ID", "").strip(),
-        "client_secret": os.getenv("GAIA_CLIENT_SECRET", "").strip(),
-        "grant_type": os.getenv("GAIA_GRANT_TYPE", "").strip(),
-    }
-    if not all(values.values()):
-        raise RuntimeError("Employee Data Gaia服务端配置缺失")
-    return GaiaEmployeeDataProvider(GaiaServerConfig(**values))
+    config = gaia_server_config_from_env()
+    return GaiaEmployeeDataProvider(GaiaProvider(
+        config=config,
+        backend=os.getenv("GAIA_BACKEND", "gaia").strip().lower(),
+    ))
