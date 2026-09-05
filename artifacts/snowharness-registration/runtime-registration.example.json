@@ -9,9 +9,6 @@
     "basic": {
       "input": "公司年休假的基本规则是什么？"
     },
-    "cancel": {
-      "input": "我想请假"
-    },
     "input_required": {
       "input": "我想请假"
     },

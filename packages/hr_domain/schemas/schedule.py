@@ -39,6 +39,9 @@ class ScheduleFact:
 
     @property
     def is_rest(self) -> bool:
+        if not self.shift_code:
+            # 缺失/空班次代码既不视为休息，也不视为工作，由 day() 归入 UNKNOWN。
+            return False
         return any(self.shift_code.startswith(p) for p in REST_SHIFT_PREFIXES)
 
     @property
@@ -67,6 +70,9 @@ class ScheduleDayTable:
         fact = self.by_date.get(date_str)
         if fact is None:
             return DayStatus.UNKNOWN
+        if not fact.shift_code:
+            # 缺失/空班次代码：无法判断工作还是休息 → UNKNOWN，绝不当作工作日。
+            return DayStatus.UNKNOWN
         return DayStatus.REST if fact.is_rest else DayStatus.WORK
 
     def fact(self, date_str: str) -> ScheduleFact | None:
@@ -78,7 +84,8 @@ class ScheduleDayTable:
         status 由 is_rest 动态判定；dataclass 的 status 字段仅作缓存/记录，
         不参与 WORK 判定，避免构造时遗漏造成未知被当工作日。
         """
-        return sorted(d for d, f in self.by_date.items() if not f.is_rest)
+        return sorted(d for d, f in self.by_date.items()
+                      if f.shift_code and not f.is_rest)
 
 
 def build_schedule_table(raw_items: list[dict]) -> ScheduleDayTable:

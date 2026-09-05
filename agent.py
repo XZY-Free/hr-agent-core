@@ -11,6 +11,8 @@ from veadk.memory.short_term_memory import ShortTermMemory
 from apps.orchestrator.agent import build_orchestrator
 from apps.orchestrator.a2a.middleware import DeterministicA2AMiddleware
 from apps.orchestrator.a2a.router import OrchestratorRemoteRouter
+from apps.orchestrator.a2a.routing import DeterministicRouteTable
+from apps.orchestrator.a2a.semantic_router import SemanticRouter, build_llm_classifier
 from apps.orchestrator.local_leave.agent import build_leave_agent
 from packages.agent_runtime.a2a.client import OfficialA2AClient
 from packages.agent_runtime.model_config import extra_config_for, model_for
@@ -87,8 +89,17 @@ def build_agent_application(
             return ""
         return session_document_context(getattr(session, "state", None), message)
 
+    # 生产语义分类器：复用 root 的模型配置，独立、无工具、单轮 Agent + Runner。
+    # 不得新增 key/env/model；模型只分类，intent→target 由代码固定映射。
+    semantic_router = SemanticRouter(
+        classifier=build_llm_classifier(
+            model_name=model_for("root"),
+            model_extra_config=extra_config_for("root"),
+        )
+    )
     remote_router = OrchestratorRemoteRouter(
         client=a2a_client,
+        route_table=DeterministicRouteTable(semantic_router=semantic_router),
         session_exists=session_exists,
         context_summary_provider=context_summary_provider,
         consult_url=consult_url,

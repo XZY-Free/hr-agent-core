@@ -122,7 +122,9 @@ def test_skip_rest_single_rest_day_rejected():
 
 
 def test_skip_rest_saturday_start_counts_from_first_workday():
-    rows = [_rest_day("2026-07-25"), _work_day("2026-07-27"), _work_day("2026-07-28")]
+    # WP-02：7-26（周日）若未知则不得跳过；此处补为已知休息日，构成完整周末。
+    rows = [_rest_day("2026-07-25"), _rest_day("2026-07-26"),
+            _work_day("2026-07-27"), _work_day("2026-07-28")]
     table = build_schedule_table(rows)
     r = compute_leave_dates(
         type_name="年休假", requested_start_date="2026-07-25",

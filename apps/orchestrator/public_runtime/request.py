@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from packages.agent_runtime.a2a.context import contains_sensitive_data
 from apps.orchestrator.public_contract.invocation_context import (
@@ -140,12 +140,21 @@ class HrAssistantRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     request_id: str = Field(min_length=1, max_length=128)
-    message: str = Field(min_length=1, max_length=20000)
+    # message 允许为空串：仅在携带非空 attachment_references 时合法（仅附件上传需澄清）。
+    message: str = Field(max_length=20000)
     context_id: str = Field(min_length=1, max_length=128)
     task_id: str | None = Field(default=None, min_length=1, max_length=128)
     execution_subject: ExecutionSubject | None = None
     # 严格公共上下文：execution_subject单独成字段。
     context: PublicRequestContext = Field(default_factory=PublicRequestContext)
+
+    @model_validator(mode="after")
+    def _message_blank_requires_attachment_references(self) -> "HrAssistantRequest":
+        if not self.message.strip():
+            refs = self.context.attachment_references
+            if not (isinstance(refs, list) and refs):
+                raise ValueError("A2A消息缺少文本内容")
+        return self
 
     def locale(self) -> str:
         return self.context.locale or "zh-CN"

@@ -5,6 +5,7 @@ grant_type / tenant。客户端由共享 GaiaServerConfig 在服务端构造；s
 开启。所有方法返回与旧 gaia 工具一致的 ok/err 结构，供领域规则与 Agent 工具复用。
 """
 
+import math
 import os
 from typing import Literal
 
@@ -26,17 +27,25 @@ class GaiaProvider:
         if self._backend not in {"gaia", "stub"}:
             raise RuntimeError("GAIA_BACKEND仅支持gaia或stub")
         self._stub_client: ConfiguredGaiaStubClient | None = None
+        # 每个 provider 只持有一个 gaia client；gaia 后端在构造时即建（纯 Python，
+        # 无 I/O），避免两个首发调用者都读到 None 而各自 new 一个 client 的初始化
+        # 竞态。不跨 config 全局共享（不同 provider 凭据/令牌保持隔离）。
+        self._gaia_client = (
+            GaiaClient(
+                corp_id=self.config.corp_id,
+                client_secret=self.config.client_secret,
+                grant_type=self.config.grant_type,
+            )
+            if self._backend == "gaia"
+            else None
+        )
 
     def _client(self, env: Env):
         if self._backend == "stub":
             if self._stub_client is None:
                 self._stub_client = ConfiguredGaiaStubClient.from_env()
             return self._stub_client
-        return GaiaClient(
-            corp_id=self.config.corp_id,
-            client_secret=self.config.client_secret,
-            grant_type=self.config.grant_type,
-        )
+        return self._gaia_client
 
     def employee_info(self, employee_id: str) -> dict:
         try:
@@ -167,18 +176,38 @@ def _normalize_balance_row(d: dict) -> dict:
         "unit": unit,
         "total": d.get("leaveTotal", 0),
         "used": d.get("leaveUsed", 0),
-        "remain": d.get("leaveRemain", 0),
+        # leaveRemain 缺失/非法不默认为 0：交给领域判 balance_unknown（fail closed）。
+        "remain": _safe_number(d.get("leaveRemain")),
         "approving": d.get("leaveApproving", 0),
         "freeze": d.get("freeze", 0),
     }
 
 
-def _normalize_unit(unit: str | None) -> str:
+def _safe_number(value) -> float | None:
+    """把 raw remain 归一为有限非负浮点；缺失/非法返回 None（领域判 balance_unknown）。"""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number) or number < 0:
+        return None
+    return number
+
+
+def _normalize_unit(unit: str | None) -> str | None:
+    """把单位归一为 day/hour；缺失/未知一律返回 None（unknown），绝不默认按天。
+
+    WP-02 §10.6：天请求只与天余额比较、小时请求只与小时余额比较；未知单位
+    归为 balance_unit_unknown，绝不做"8 小时=1 天"硬转。缺失单位只有当 root 在
+    服务端显式补 leaveUnit 后才进入比较，否则 fail closed。
+    """
     if not unit:
-        return "day"
+        return None
     normalized = str(unit).strip().lower()
     if normalized in {"day", "d", "天", "1"}:
         return "day"
     if normalized in {"hour", "h", "时", "小时", "2"}:
         return "hour"
-    return normalized
+    return None

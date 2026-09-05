@@ -6,6 +6,8 @@
 
 你现在位于 `hr-agent-core` 项目根目录。
 
+> **当前执行口径（2026-09-05 更新，优先于下文旧口径）**：测试验收环境已切换为 **AgentKit 远端 HTTP 客户端验收**（默认 `testpaths=["tests/agentkit"]`）。`uv run pytest -q` 只收集该目录下用例，不装配本地业务 Agent、不自动读取本地配置文件；凭据由执行测试的进程环境安全注入。本机不做本地测试/本地服务。Gaia 为唯一显式假数据例外（授权 stub 边界）。**已在授权边界内完成全部 WP 验收**（`tests/agentkit` 全量 258 passed / 0 failed / 0 skipped，JUnit 证据 `tests/e2e/logs/agentkit-remediation-final-v33-v14-v11-2026-09-05.xml`）；不以 health 200 冒充完整 WP 通过。
+
 你的任务不是重新审查项目，也不是重新设计方案。
 
 你必须严格实施工程包：
@@ -138,22 +140,25 @@
 
 ## 八、测试要求
 
+> 按当前执行口径：验收入口为 `tests/agentkit` 远端 HTTP 客户端（`uv run pytest -q`），不在本机装配本地业务 Agent/启动本地服务。旧 `/tests/eval`、本地 A2A 命令仅为历史记录，不作为当前「通过」依据。Gaia 为授权 stub 例外，不作 health 200 冒充业务通过。
+
 禁止：
 
 - skip 新失败 case；
 - xfail 掩盖问题；
 - 把 expected 改成当前错误行为；
 - 只跑自己新增的 3 个测试就宣布完成；
-- 使用 monolithic local_agent 证明 production topology。
+- 使用 monolithic local_agent 证明 production topology；
+- 注入 session state 伪造业务事实，或凭本地代码声称云上已更正。
 
 每个 WP 都必须运行：
 
-- 本 WP tests；
-- 相关 integration；
-- 全量 unit；
+- 本 WP tests（收敛到 `tests/agentkit` 远端用例）；
+- 相关 integration（以 `tests/agentkit` 为当前入口）；
+- 可执行的回归集合（旧 `/tests/eval` 仅为历史记录）；
 - `git diff --check`。
 
-最终 WP-07 必须跑 production-topology suite。
+最终 WP-07 必须跑 production-topology 远端验收 suite。
 
 ---
 
@@ -223,4 +228,4 @@
 
 ---
 
-现在直接从 WP-01 开始实施。
+现在直接从 WP-01 开始实施；按当前执行口径以 AgentKit 远端验收（`tests/agentkit`）为准，Codex 负责远端执行门禁。

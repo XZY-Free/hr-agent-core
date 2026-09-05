@@ -207,5 +207,5 @@ async def test_runtime_resolved_url_attachment_passes_doc_context_to_consult():
     assert captured["summary"]
     ctx = decode_document_context(captured["summary"])
     assert ctx is not None
-    assert ctx.url == "https://docs.example.com/notice.docx"
+    assert ctx.documents[0].url == "https://docs.example.com/notice.docx"
     assert "employeeId" not in captured["summary"]

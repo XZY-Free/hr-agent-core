@@ -77,7 +77,11 @@ def test_parse_document_uses_exact_sanitized_cross_runtime_content(monkeypatch):
     monkeypatch.setattr("apps.consult_agent.tools.parse_document.requests.get", fail_download)
     content = "# 2026年春节假期通知\n值班表需在2月10日前备案。"
     with bind_document_context(
-        {"url": "https://example.com/notice.docx", "content": content}
+        {"documents": [{
+            "canonical_reference": "ref-1",
+            "url": "https://example.com/notice.docx",
+            "content": content,
+        }]}
     ):
         result = parse_document(
             "https://example.com/notice.docx", tool_context=object()
@@ -95,7 +99,11 @@ def test_parse_document_context_never_matches_a_different_url(monkeypatch):
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("network")),
     )
     with bind_document_context(
-        {"url": "https://example.com/notice.docx", "content": "safe"}
+        {"documents": [{
+            "canonical_reference": "ref-1",
+            "url": "https://example.com/notice.docx",
+            "content": "safe",
+        }]}
     ):
         result = parse_document("https://example.com/other.docx", tool_context=object())
 

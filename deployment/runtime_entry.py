@@ -5,7 +5,7 @@ import sys
 
 
 _RUNTIME_MODULES = {
-    "orchestrator": "agent",
+    "orchestrator": "apps.orchestrator.public_a2a",
     "consult": "apps.consult_agent.cloud",
     "employee-data": "apps.employee_data_agent.cloud",
 }

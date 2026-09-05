@@ -39,7 +39,8 @@ _CROSS_EMPLOYEE = re.compile(
 )
 _LEAVE_ACTION = re.compile(r"(?:我要|我想|帮我|明天|后天).{0,10}(?:请|申请|办理).{0,8}假")
 _POLICY = re.compile(
-    r"制度|政策|规定|扣款|罚款|怎么请|流程|材料|需.{0,4}什么|"
+    r"制度|政策|规定|扣款|罚款|怎么申请|如何申请|怎么办理|如何办理|"
+    r"申请流程|办理流程|怎么请|流程|材料|需.{0,4}什么|"
     r"餐补|系统.{0,4}(?:操作|怎么用)|(?:省份|省|市)[^,。]{0,6}(?:育儿假|假)"
 )
 
@@ -195,7 +196,10 @@ class EmployeeDataRuntime:
             return result
 
         target = _extract_target(request.message) if query_type == "leave_balance_by_type" else None
-        selected, answer, selection_error = _select_data(query_type, turn.data or {}, target)
+        year = _extract_year(request.message) if query_type == "leave_balance_by_type" else None
+        selected, answer, selection_error = _select_data(
+            query_type, turn.data or {}, target, year
+        )
         if selection_error:
             status, retryable = _error_status(selection_error)
             result = self._result(
@@ -295,21 +299,40 @@ def _is_province_policy(message: str) -> bool:
     ))
 
 
-def _extract_target(message: str) -> str | None:
-    """从消息提取目标假种（按问题意图，不给词），并做共享假种标准化。
+_YEAR_RE = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
 
-    "我还有几天育儿假" → 育儿假；省份政策问句已由 _is_province_policy 排除。
+
+def _extract_year(message: str) -> int | None:
+    """提取用户明确给出的 4 位 effective year（如 2026年）；无则返回 None，不做猜测。"""
+    match = _YEAR_RE.search(message or "")
+    if not match:
+        return None
+    return int(match.group(0))
+
+
+def _extract_target(message: str) -> str | None:
+    """从消息提取目标假种，用共享标准化结果，最长/最具体 token 优先。
+
+    "我还有几天育儿假" → 育儿假；"我的全薪病假还剩多少" → 全薪病假（不会被短词
+    "病假" 抢先）。省份政策问句已由 _is_province_policy 排除。
     """
-    for phrase in ("育儿假", "年休假", "年假", "调休假", "调休", "病假",
-                   "事假", "全薪病假", "婚假", "陪产假"):
-        if phrase in message:
-            from packages.hr_domain.constants.leave_rules import normalize_type_name
-            return normalize_type_name(phrase) or phrase
+    from packages.hr_domain.constants.leave_rules import (
+        KNOWN_TYPE_TOKENS,
+        normalize_type_name,
+    )
+    for phrase in KNOWN_TYPE_TOKENS:
+        if phrase and phrase in message:
+            normalized = normalize_type_name(phrase)
+            if normalized:
+                return normalized
     return None
 
 
 def _select_data(
-    query_type: str, data: dict, target_leave_type: str | None = None
+    query_type: str,
+    data: dict,
+    target_leave_type: str | None = None,
+    effective_year: int | None = None,
 ) -> tuple[dict | None, str, str | None]:
     if query_type == "medical_period":
         value = data.get("medical_period")
@@ -329,7 +352,7 @@ def _select_data(
         if not isinstance(balances, list):
             return None, "", "internal_data_error"
         if query_type == "leave_balance_by_type":
-            return _render_single_balance(balances, target_leave_type)
+            return _render_single_balance(balances, target_leave_type, effective_year)
         return _render_all_balances(balances)
     annual = data.get("annual_leave")
     if not isinstance(annual, dict):
@@ -349,12 +372,20 @@ def _unit_label(unit: str | None) -> str:
 
 
 def _render_single_balance(
-    balances: list[dict], target: str | None
+    balances: list[dict], target: str | None, effective_year: int | None = None
 ) -> tuple[dict | None, str, str | None]:
     if not balances:
         return None, "", "leave_balance_not_found"
     # 优先精确匹配目标假种；缺失返回 not_found，绝不冒用第一行。
-    row = next((r for r in balances if r.get("leave_name") == target), None) if target else None
+    rows = [r for r in balances if r.get("leave_name") == target] if target else []
+    if effective_year is None:
+        row = rows[0] if rows else None
+    else:
+        # 用户明确指定年份：只在该假种内按年份选中；无该年份行 → not_found，不第一行兜底。
+        row = next(
+            (r for r in rows if str(r.get("effective_year")) == str(effective_year)),
+            None,
+        )
     if row is None:
         return None, "", "leave_balance_not_found"
     if "remain" not in row:
@@ -377,7 +408,7 @@ def _render_all_balances(balances: list[dict]) -> tuple[dict | None, str, str | 
 
 
 def _error_status(error_code: str) -> tuple[str, bool]:
-    if error_code == "employee_not_found":
+    if error_code in {"employee_not_found", "leave_balance_not_found"}:
         return "not_found", False
     if error_code in {"gaia_auth_failed", "gaia_unavailable"}:
         return "temporarily_unavailable", True
@@ -387,6 +418,8 @@ def _error_status(error_code: str) -> tuple[str, bool]:
 def _error_answer(error_code: str) -> str:
     if error_code == "employee_not_found":
         return "没有查询到当前员工数据。"
+    if error_code == "leave_balance_not_found":
+        return "没有查到该假种或其指定年份的余额。"
     if error_code in {"gaia_auth_failed", "gaia_unavailable"}:
         return "本人数据暂时无法查询，请稍后重试。"
     return "本人数据查询失败，请稍后重试。"

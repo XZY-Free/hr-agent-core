@@ -25,17 +25,34 @@ def _parse_kind(value) -> AttendanceKind | None:
     return None
 
 
+def _as_exempt_count(value):
+    """解析一侧免扣次数：None→未知；非负整数→已知；负数/非法→抛 ValueError(fail closed)。
+
+    绝不把「未知/非法」静默转成 0——否则会把未提供的一侧当作已有 0 次而错误放行。
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("invalid monthly exempt count")
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise ValueError("invalid monthly exempt count")
+        normalized = int(value)
+    else:
+        normalized = value
+    if normalized < 0:
+        raise ValueError("invalid monthly exempt count")
+    return normalized
+
+
 def _monthly_entry(monthly_exempt: dict | None) -> MonthlyExemptContext | None:
     if not isinstance(monthly_exempt, dict):
         return None
-    late = monthly_exempt.get("late_prior_exempt")
-    early = monthly_exempt.get("early_leave_prior_exempt")
+    late = _as_exempt_count(monthly_exempt.get("late_prior_exempt"))
+    early = _as_exempt_count(monthly_exempt.get("early_leave_prior_exempt"))
     if late is None and early is None:
         return None
-    return MonthlyExemptContext(
-        late_prior_exempt=int(late) if late is not None else 0,
-        early_leave_prior_exempt=int(early) if early is not None else 0,
-    )
+    return MonthlyExemptContext(late_prior_exempt=late, early_leave_prior_exempt=early)
 
 
 def attendance_calculation(records: list, monthly_exempt: dict | None = None,
@@ -66,9 +83,15 @@ def attendance_calculation(records: list, monthly_exempt: dict | None = None,
             source_expression=str(item.get("duration", "")), sequence=idx,
         ))
 
+    try:
+        exempt_context = _monthly_entry(monthly_exempt)
+    except ValueError:
+        # 月度免扣次数为负数/非法：fail closed，不当作 0 放行。
+        return _err("invalid_monthly_exempt_context", "请提供有效的本月免扣次数。")
+
     result = calculate_attendance(AttendanceInput(
         records=parsed_records,
-        exempt_context=_monthly_entry(monthly_exempt),
+        exempt_context=exempt_context,
     ))
 
     if result.unresolved_context:

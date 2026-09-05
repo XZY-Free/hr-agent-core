@@ -10,7 +10,7 @@ import time
 from a2a.server.agent_execution import RequestContext
 from a2a.server.events.event_queue import EventQueue
 from a2a.server.tasks.task_updater import TaskUpdater
-from a2a.types import InvalidParamsError, TaskState
+from a2a.types import InvalidParamsError, TaskState, UnsupportedOperationError
 from a2a.utils import new_task
 from a2a.utils.errors import ServerError
 
@@ -46,7 +46,11 @@ def _extract_text(message) -> str:
             texts.append(text)
     text = "\n".join(texts).strip()
     if not text:
-        raise PublicContractError("A2A消息缺少文本内容")
+        # 空白文本仅在携带非空 attachment_references 时合法（仅附件上传需澄清）。
+        metadata = dict(getattr(message, "metadata", None) or {})
+        refs = metadata.get("attachment_references")
+        if not (isinstance(refs, list) and refs):
+            raise PublicContractError("A2A消息缺少文本内容")
     return text
 
 
@@ -121,5 +125,8 @@ class HrAssistantExecutor(CancellableExecutor):
             await updater.complete()
             return TaskState.completed
 
-    async def task_cancelled(self, context):
-        await self.runtime.cancel_pending(context.context_id, context.task_id)
+    async def cancel(self, context, event_queue):
+        # 公共 Orchestrator 不暴露 A2A tasks/cancel：任何取消请求一律以官方
+        # UnsupportedOperationError(-32004) 立即拒绝，绝不改变任务状态、不调用运行时
+        # 取消、不向下游传递取消。resume 仍走上面的 execute/执行继承机制，不受影响。
+        raise ServerError(error=UnsupportedOperationError())

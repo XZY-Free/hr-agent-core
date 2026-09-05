@@ -5,6 +5,7 @@
 - 单位解析（分钟/小时/半小时）；
 - 一般异常 10 分钟档阶梯（每 10 分钟 20 元，不足 10 按 10）；
 - 10 分钟（含）以内月度豁免（单次 <=10 分钟，月度前 2 次免，超过扣 20）；
+  迟到与早退各自维护已用免扣次数，单批内成功免扣一条会将该池计数 +1，两池互不影响；
 - 严重迟到/早退（60<=m<240 旷工 0.5；m>=240 旷工 1），严重不再产生金额；
 - 多记录按原顺序累计，审计留痕。
 
@@ -21,7 +22,6 @@ from packages.hr_domain.schemas.attendance import (
     AttendanceKind,
     AttendanceRecord,
     AttendanceResult,
-    MonthlyExemptContext,
 )
 
 # 每分钟档位：40 元档 = 10 分钟（20 元/10 分钟）
@@ -106,12 +106,19 @@ def _match_num(text: str) -> tuple[float] | None:
 def calculate_attendance(input: AttendanceInput) -> AttendanceResult:
     result = AttendanceResult()
     ctx = input.exempt_context
+    late_count: int | None = ctx.late_prior_exempt if ctx is not None else None
+    early_count: int | None = ctx.early_leave_prior_exempt if ctx is not None else None
+    # 负数/非法月度免扣次数 fail closed，绝不当作 0。
+    if (
+        (late_count is not None and late_count < 0)
+        or (early_count is not None and early_count < 0)
+    ):
+        result.error_code = "invalid_monthly_exempt_context"
+        result.error_message = "本月免扣次数非法。"
+        return result
     for idx, record in enumerate(input.records):
-        item = _evaluate_record(
-            record,
-            exempt=ctx,
-            sequence=idx + 1,
-        )
+        prior = _pool_prior(late_count, early_count, record.kind)
+        item = _evaluate_record(record, prior=prior, sequence=idx + 1)
         result.records.append(item)
         result.total_deduction += item.deduction
         result.total_absence_days += item.absence_days
@@ -123,16 +130,22 @@ def calculate_attendance(input: AttendanceInput) -> AttendanceResult:
             result.error_code = item.error_code
             result.error_message = item.error_message
             return result
+        # 免扣一次：把该池本轮已用次数 +1（未知或已超限都不会进入免扣分支）。
+        if item.exemption_applied:
+            if record.kind is AttendanceKind.LATE and late_count is not None:
+                late_count += 1
+            elif record.kind is AttendanceKind.EARLY_LEAVE and early_count is not None:
+                early_count += 1
     return result
 
 
 def _evaluate_record(
     record: AttendanceRecord,
     *,
-    exempt: MonthlyExemptContext | None,
+    prior: int | None,
     sequence: int,
 ) -> AttendanceItemResult:
-    """评估单条异常记录。"""
+    """评估单条异常记录；prior 为该迟到/早退池本轮的已用免扣次数（未知为 None）。"""
     minutes = record.duration_minutes
     if minutes <= 0:
         return AttendanceItemResult(
@@ -161,9 +174,8 @@ def _evaluate_record(
 
     # 10 分钟（含）以内：月度小额豁免判断。
     if minutes <= BUCKET_MINUTES:
-        prior = _prior_exempt(record.kind, exempt)
         if prior is None:
-            # 缺月度上下文本，不猜第一次或第三次 → 需追问。
+            # 缺该池月度上下文，不猜第一次或第三次 → 需追问。
             return AttendanceItemResult(
                 sequence=sequence, kind=record.kind, original_minutes=minutes,
                 chargeable_bucket=BUCKET_MINUTES, deduction=0.0,
@@ -197,13 +209,11 @@ def _evaluate_record(
     )
 
 
-def _prior_exempt(kind: AttendanceKind, exempt: MonthlyExemptContext | None) -> int | None:
-    """返回该 kind 在本月的已免扣次数；无上下文返回 None（不猜）。"""
-    if exempt is None:
-        return None
+def _pool_prior(late_count: int | None, early_count: int | None, kind: AttendanceKind) -> int | None:
+    """按迟到/早退各自取池内已用免扣计数（每池独立；未提供记为 None/未知）。"""
     if kind is AttendanceKind.LATE:
-        return exempt.late_prior_exempt
-    return exempt.early_leave_prior_exempt
+        return late_count
+    return early_count
 
 
 def _kind_label(kind: AttendanceKind) -> str:

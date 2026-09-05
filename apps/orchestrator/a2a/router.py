@@ -11,6 +11,7 @@ from apps.orchestrator.a2a.routing import (
     DeterministicRouteTable,
     RouteTarget,
 )
+from apps.orchestrator.a2a.semantic_router import Intent
 from packages.agent_runtime.a2a.client import (
     A2AInvocationError,
     OfficialA2AClient,
@@ -66,6 +67,23 @@ class RemoteContinuation:
     context_id: str
 
 
+@dataclass(frozen=True)
+class LocalLeaveDispatch:
+    """内部指令：semantic decision=leave_transaction 确定性派发本地 Leave runner。
+
+    只由 OrchestratorRemoteRouter 产出，是路由指令而非公共远程状态；绝不能进入
+    RemoteRouteResponse / _map_remote 或公共 result。Runtime 见它即走本地 Leave runner，
+    并据此登记 local_leave continuation owner，而不是解析 answer / regex 推断。
+    """
+
+
+# 语义低置信度/歧义 → 固定、非敏感的本地澄清公共结果（经 Runtime 映射为
+# input_required / missing_information，data 无 draft；含可接受澄清词）。
+# target 必须是固定三值契约之一（local/consult/employee_data），故本地澄清用 "local"。
+_LOCAL_CLARIFICATION_TARGET = "local"
+LOCAL_CLARIFICATION_ANSWER = "为更好地帮您，请补充说明您是想办理请假、查询本人余额，还是了解哪项制度？"
+
+
 class OrchestratorRemoteRouter:
     def __init__(
         self,
@@ -101,7 +119,7 @@ class OrchestratorRemoteRouter:
 
     async def route(
         self, payload: dict, *, attachment_context_summary: str | None = None
-    ) -> RemoteRouteResponse | None:
+    ) -> RemoteRouteResponse | LocalLeaveDispatch | None:
         extracted = _extract_payload(payload)
         if extracted is None:
             return None
@@ -112,11 +130,34 @@ class OrchestratorRemoteRouter:
             return None
         key = (user_id, session_id, payload.get("task_id"))
         pending = self._continuations.get(key)
-        target = pending.target if pending else self.route_table.decide(
-            message, user_id=user_id, session_id=session_id,
-            task_id=payload.get("task_id"),
-        )
+        decision = None
+        if pending:
+            # continuation owner 优先（远程续接，不重分类）。
+            target = pending.target
+            clarification_required = False
+        else:
+            selection = await self.route_table.decide(
+                message, user_id=user_id, session_id=session_id,
+                task_id=payload.get("task_id"),
+            )
+            target = selection.target
+            clarification_required = selection.clarification_required
+            decision = selection.decision
+        # 语义低置信度/歧义 → 固定本地澄清公共结果：不进入 Root/Leave，也不远程派发。
+        # target 用三值契约的 "local"，绝不暴露非契约值。
+        if clarification_required:
+            return RemoteRouteResponse(
+                answer=LOCAL_CLARIFICATION_ANSWER,
+                request_id=str(uuid4()),
+                target=_LOCAL_CLARIFICATION_TARGET,
+                status="need_more_information",
+            )
         if target == RouteTarget.LOCAL:
+            # 普通 local（general_local / page/handoff/cancel/greeting guard）→ 仍进入 Root
+            # （返回 None）；只有语义分类为 leave_transaction 时确定性派发本地 Leave runner，
+            # 绝不依赖 answer 文本 / regex 推断。
+            if decision is not None and decision.intent == Intent.LEAVE_TRANSACTION:
+                return LocalLeaveDispatch()
             return None
         request_id = str(uuid4())
         context_summary = ""

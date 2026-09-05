@@ -7,10 +7,14 @@
 
 from __future__ import annotations
 
+import math
+import re
 from dataclasses import dataclass
 
 from packages.hr_domain.schemas.leave_draft import DurationUnit, TimeMode
 from packages.hr_domain.schemas.schedule import ScheduleFact
+
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 
 # 连续自然日遇休息日时的 canonical calendar-day time（领域常量，模型无权决定）。
 CALENDAR_DAY_START = "08:00"
@@ -96,10 +100,11 @@ def authoritative_duration(
 
     if time_mode is TimeMode.EXPLICIT_HOURS:
         # 明确 N 小时：保持 hour 单位，不强制换 0.5 天。
-        if requested_hours is None or requested_hours <= 0:
+        if requested_hours is None or not _finite_positive(requested_hours):
             return DurationOutcome(
                 None, None, None, None,
-                error_code="invalid_hours", error_message="小时数必须大于 0。",
+                error_code="invalid_hours",
+                error_message="小时数必须大于 0 且为有限数值。",
             )
         return DurationOutcome(
             requested_hours, DurationUnit.HOUR, requested_start_time, requested_end_time,
@@ -146,16 +151,21 @@ def duration_day_value(duration_value: float, duration_unit: DurationUnit) -> fl
 
 
 def _range_hours(start: str | None, end: str | None) -> float | None:
-    """start/end HH:mm 差（小时）。跨天（start>end）按次日计；无效返回 None。"""
-    if not start or not end:
+    """start/end HH:mm 差（小时）。跨天（start>end）按次日计；非法时间返回 None。"""
+    if not _valid_time(start) or not _valid_time(end):
         return None
-    try:
-        sh, sm = start.split(":")
-        eh, em = end.split(":")
-    except ValueError:
-        return None
+    sh, sm = start.split(":")
+    eh, em = end.split(":")
     start_min = int(sh) * 60 + int(sm)
     end_min = int(eh) * 60 + int(em)
     if end_min < start_min:
         end_min += 24 * 60
     return (end_min - start_min) / 60.0
+
+
+def _valid_time(value: str | None) -> bool:
+    return bool(value) and _TIME_RE.match(value) is not None
+
+
+def _finite_positive(value: float | None) -> bool:
+    return value is not None and math.isfinite(value) and value > 0

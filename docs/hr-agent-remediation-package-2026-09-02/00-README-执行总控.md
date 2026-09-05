@@ -7,6 +7,14 @@
 
 ---
 
+> **当前执行口径（2026-09-05 更新，优先于本包旧口径）**
+> 测试验收环境已切换为 **AgentKit 远端 HTTP 客户端验收**：默认 `testpaths=["tests/agentkit"]`，`uv run pytest -q` 只收集该目录下用例，不装配本地业务 Agent、不自动读取本地配置文件；凭据由执行测试的进程环境安全注入。
+> 已在授权边界内**完成全部 WP 验收**：全量 `tests/agentkit` 远端用例 258 passed / 0 failed / 0 skipped（耗时 925.86 秒），JUnit 证据 `tests/e2e/logs/agentkit-remediation-final-v33-v14-v11-2026-09-05.xml`；WP01-WP07 在授权边界内 PASS，整体结论 **业务迁移非假实现整改：PASS（AgentKit 开发环境；Gaia 为授权 stub 边界）**。
+> **Gaia 保留（用户明确授权的唯一显式假数据例外）**：`GAIA_BACKEND=stub`、`EMPLOYEE_DATA_BACKEND=stub`、`GAIA_DRY_RUN=true`；真实 Gaia 接入与 OAuth 缓存未验证、不计为已通过，不再索取 Gaia 凭据。云端已发布并生效：`GAIA_BACKEND=stub` 且干跑时 `gaia_server_config_from_env` 不再强制 Gaia 四项（默认 `gaia` 仍校验）。服务端可信身份（`EMPLOYEE_IDENTITY_MAP_JSON` / `EMPLOYEE_REF_SECRET`）为真实必需配置、非 Gaia 例外。WP07 旧 L1-L5 本地 stub 验收层已被用户覆盖为**云部署服务验收**。
+> 结论以真实远端证据为准；例外项（真实 Gaia/OAuth、Leave 下游 dry-run、附件外部 resolver、A2A cancel）明确列出、不虚化为已通过。下文业务矩阵、七 WP 顺序与冻结边界不变。
+
+---
+
 ## 1. 为什么有这套工程包
 
 当前 HR Agent 从 FastGPT 工作流迁移到 `Orchestrator + Leave + Consult + Employee Data + Domain Rules + A2A` 的总体方向是正确的。
@@ -296,6 +304,8 @@ Leave Draft 中关键字段必须明确来源：
 13. 生产拓扑 Golden Suite 通过；
 14. 本轮明确排除的“假实现”行为未被偷偷改动；
 15. README / 架构说明只在真实测试通过后更新为准确状态。
+
+> 执行口径：上述条件按**当前 AgentKit 远端验收**逐 WP 收敛，且以真实证据对齐为准；Gaia 为授权 stub 例外。当前已完成 WP01-WP07 授权边界内验收（258/258，见本包当前执行口径）。
 
 ---
 

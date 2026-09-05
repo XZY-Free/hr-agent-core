@@ -8,8 +8,8 @@ INCREMENTAL_CONTENT = False
 INPUT_REQUIRED = True
 # input-required后客户端在同一task/context续发补充信息（真实协议与运行时均支持）。
 RESUME = True
-# tasks/cancel 等待本地工作退出和下游停止确认；不撤销已完成的业务副作用。
-CANCEL = True
+# tasks/cancel 不受支持：公共任务以官方 UnsupportedOperationError(-32004) 拒绝取消。
+CANCEL = False
 # 跨进程/重启后的任务持久恢复——InMemoryTaskStore，未证明。
 DURABLE_TASK_RECOVERY = False
 

@@ -46,6 +46,13 @@ TYPE_ALIASES: dict[str, str] = {
     "丧假": "丧假",
 }
 
+# 已知假期类型 token（正式名 + 别名），按长度降序，用于最长非重叠匹配，避免
+# "陪产假 ⊃ 产假"这类子串误报。
+KNOWN_TYPE_TOKENS: tuple[str, ...] = tuple(sorted(
+    {*SKIP_RESTDAY_MAP.keys(), *TYPE_ALIASES.keys(), *TYPE_ALIASES.values()},
+    key=len, reverse=True,
+))
+
 
 def normalize_type_name(raw: str) -> str | None:
     """把口语假期名标准化为 SKIP_RESTDAY_MAP 的正式名；未知返回 None。"""

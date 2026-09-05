@@ -1,6 +1,7 @@
 """盖亚 OpenAPI 客户端：JWT 缓存、统一请求封装。地址与环境按《接口适配清单.md》原样。"""
 import json
 import os
+import threading
 import time
 from datetime import date, timedelta
 
@@ -18,22 +19,24 @@ class GaiaClient:
         self.client_secret = client_secret
         self.grant_type = grant_type
         self._jwt_cache: dict[str, tuple[str, float]] = {}   # env -> (jwt, expire_ts)
+        self._jwt_lock = threading.Lock()                    # 串行刷新，避免重复 OAuth
 
     def get_jwt(self, env: str) -> str:
-        cached = self._jwt_cache.get(env)
-        if cached and cached[1] > time.time():
-            return cached[0]
-        resp = requests.post(
-            f"{BASE_URLS[env]}/identity/api/v1/oauth",
-            data={"grant_type": self.grant_type, "corp_id": self.corp_id,
-                  "client_secret": self.client_secret},
-            timeout=TIMEOUT)
-        body = resp.json()
-        if not (body.get("result") and body.get("code") == 200):
-            raise RuntimeError(f"获取盖亚JWT失败: {body.get('message')}")
-        jwt = body["data"]
-        self._jwt_cache[env] = (jwt, time.time() + JWT_TTL_SECONDS)
-        return jwt
+        with self._jwt_lock:
+            cached = self._jwt_cache.get(env)
+            if cached and cached[1] > time.time():
+                return cached[0]
+            resp = requests.post(
+                f"{BASE_URLS[env]}/identity/api/v1/oauth",
+                data={"grant_type": self.grant_type, "corp_id": self.corp_id,
+                      "client_secret": self.client_secret},
+                timeout=TIMEOUT)
+            body = resp.json()
+            if not (body.get("result") and body.get("code") == 200):
+                raise RuntimeError(f"获取盖亚JWT失败: {body.get('message')}")
+            jwt = body["data"]
+            self._jwt_cache[env] = (jwt, time.time() + JWT_TTL_SECONDS)
+            return jwt
 
     def request(self, env: str, method: str, path: str, *, json_body=None,
                 params=None, extra_headers=None, tenant: str | None = None) -> dict:
@@ -46,6 +49,47 @@ class GaiaClient:
                                 json=json_body, params=params,
                                 headers=headers, timeout=TIMEOUT)
         return resp.json()
+
+
+# 固定日期排班覆盖只允许这些字段；shiftDate 始终由查询循环当前日期生成，不可覆盖。
+_SCHEDULE_OVERRIDE_FIELDS = (
+    "shiftCode", "shiftName", "startTime", "endTime",
+    "mealBeginTime", "mealEndTime", "middleTime",
+)
+_SCHEDULE_OVERRIDE_OPTIONAL_FIELDS = ("mealBeginTime", "mealEndTime", "middleTime")
+
+
+def _validate_schedule_overrides(raw) -> dict | None:
+    """校验可选固定日期排班覆盖；缺失/None 视为无覆盖（保持现默认行为）。
+
+    格式：{ISO日期: {shiftCode, shiftName, startTime, endTime,
+                    mealBeginTime?, mealEndTime?, middleTime?}}。
+    shiftCode/startTime/endTime 必须是字符串（空串可表达未知）；可选字段只能 str/None。
+    只允许上述字段；日期键必须合法 ISO；非法即抛 RuntimeError("GAIA Stub配置无效")。
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise RuntimeError("GAIA Stub配置无效")
+    normalized = {}
+    for key, row in raw.items():
+        try:
+            parsed = date.fromisoformat(str(key))
+        except (TypeError, ValueError):
+            raise RuntimeError("GAIA Stub配置无效") from None
+        if not isinstance(row, dict):
+            raise RuntimeError("GAIA Stub配置无效")
+        if not set(row).issubset(_SCHEDULE_OVERRIDE_FIELDS):
+            raise RuntimeError("GAIA Stub配置无效")
+        for field in ("shiftCode", "shiftName", "startTime", "endTime"):
+            if field in row and not isinstance(row[field], str):
+                raise RuntimeError("GAIA Stub配置无效")
+        for field in _SCHEDULE_OVERRIDE_OPTIONAL_FIELDS:
+            if field in row and row[field] is not None and not isinstance(row[field], str):
+                raise RuntimeError("GAIA Stub配置无效")
+        # 规范化键到 yyyy-MM-dd，保证与 _schedule 里 current.isoformat() 精确匹配。
+        normalized[parsed.isoformat()] = row
+    return normalized
 
 
 class ConfiguredGaiaStubClient:
@@ -72,6 +116,9 @@ class ConfiguredGaiaStubClient:
         if not all(isinstance(value, int) for value in config["rest_day_offsets"]):
             raise RuntimeError("GAIA Stub配置无效")
         self.config = config
+        self.schedule_overrides = _validate_schedule_overrides(
+            config.get("schedule_overrides")
+        )
 
     @classmethod
     def from_env(cls) -> "ConfiguredGaiaStubClient":
@@ -122,13 +169,20 @@ class ConfiguredGaiaStubClient:
         current = start
         while current <= end:
             rest = current in rest_dates
-            rows.append({
+            row = {
                 "shiftDate": current.isoformat(),
                 "shiftCode": "OFF01" if rest else "SCQY01",
                 "shiftName": "休息" if rest else "白班",
                 "startTime": "00:00" if rest else "08:00",
                 "endTime": "00:00" if rest else "17:00",
-            })
+            }
+            if self.schedule_overrides:
+                override = self.schedule_overrides.get(current.isoformat())
+                if override:
+                    for field in _SCHEDULE_OVERRIDE_FIELDS:
+                        if field in override:
+                            row[field] = override[field]
+            rows.append(row)
             current += timedelta(days=1)
         return {"details": {"employeeData": [{"employeeDetailData": rows}]}}
 

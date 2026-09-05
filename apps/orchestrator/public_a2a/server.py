@@ -18,6 +18,7 @@ from packages.agent_runtime.a2a.server import build_jsonrpc_app
 
 from apps.orchestrator.public_a2a.card import build_agent_card
 from apps.orchestrator.public_a2a.executor import HrAssistantExecutor
+from apps.orchestrator.public_a2a.request_handler import PublicRequestHandler
 from apps.orchestrator.public_a2a.settings import (
     ENV_BEARER_TOKEN,
     PublicA2ASettings,
@@ -84,6 +85,7 @@ def build_public_a2a_app(*, runtime, settings: PublicA2ASettings):
             "protocol_version": "0.3.0",
             "auth_mode": settings.auth_mode,
         },
+        request_handler_factory=PublicRequestHandler,
     )
     if settings.auth_mode == "bearer":
         app.add_middleware(BearerAuthMiddleware, token=_bearer_token())
@@ -93,12 +95,17 @@ def build_public_a2a_app(*, runtime, settings: PublicA2ASettings):
 def build_runtime():
     """从现有应用装配公共执行门面（复用业务路径，不复制路由）。"""
     from apps.orchestrator.public_runtime.runtime import HrAssistantRuntime
+    from apps.orchestrator.public_runtime.attachments import AttachmentResolver
 
     application = _load_application()
     return HrAssistantRuntime(
         remote_router=application.remote_router,
         local_runner=_build_local_runner(application),
+        leave_runner=_build_leave_runner(application),
         hr_context_builder=_build_hr_context_builder(),
+        # 空 resolver registry 的真实 fail-closed 边界：由 resolver 自身在 resolve_all
+        # 内先做数量/类型校验，再对支持类型返回 attachment_not_resolvable。
+        attachment_resolver=AttachmentResolver(),
     )
 
 
@@ -143,6 +150,26 @@ def _build_local_runner(application):
     return PublicLocalRunner(Runner(
         agent=root,
         app_name=root.name,
+        short_term_memory=application.short_term_memory,
+    ))
+
+
+def _build_leave_runner(application):
+    """构造独立本地 Leave runner：复用 application.leave_agent、共享 memory、相同 app_name。
+
+    leave_agent 已是 root 的 child；用 ADK BaseAgent.clone() 得到 parent_agent=None 的
+    独立 runner root，并设置 disallow_transfer_to_parent=True，避免 direct runner 再转回
+    Root。不重新 new 模型配置，不读取新 env/key。
+    """
+    from veadk import Runner
+    from apps.orchestrator.public_runtime.runner import PublicLocalRunner
+
+    leave = application.leave_agent.clone()
+    leave.parent_agent = None
+    leave.disallow_transfer_to_parent = True
+    return PublicLocalRunner(Runner(
+        agent=leave,
+        app_name=application.root_agent.name,
         short_term_memory=application.short_term_memory,
     ))
 

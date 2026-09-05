@@ -50,18 +50,19 @@ def completed(
     )
 
 
-def input_required(*, request_id: str, answer: str) -> HrAssistantResult:
+def input_required(*, request_id: str, answer: str, data: dict | None = None) -> HrAssistantResult:
     return HrAssistantResult(
         request_id=request_id,
         status="input_required",
         answer=answer,
         result_type="missing_information",
         error_code="input_required",
+        data=data,
     )
 
 
 def rejected(
-    *, request_id: str, answer: str, error_code: str
+    *, request_id: str, answer: str, error_code: str, data: dict | None = None
 ) -> HrAssistantResult:
     return HrAssistantResult(
         request_id=request_id,
@@ -69,6 +70,7 @@ def rejected(
         answer=answer,
         result_type="error",
         error_code=error_code,
+        data=data,
     )
 
 
@@ -78,6 +80,7 @@ def failed(
     answer: str,
     error_code: str,
     retryable: bool = True,
+    data: dict | None = None,
 ) -> HrAssistantResult:
     return HrAssistantResult(
         request_id=request_id,
@@ -86,4 +89,5 @@ def failed(
         result_type="error",
         error_code=error_code,
         retryable=retryable,
+        data=data,
     )

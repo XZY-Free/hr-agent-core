@@ -21,16 +21,21 @@ dependencies = [
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "responses>=0.25"]
 
 [tool.pytest.ini_options]
+testpaths = ["tests/agentkit"]
+addopts = "--tb=short --no-showlocals"
 markers = [
-    "eval: 需要真实方舟模型 Key 的对话评测，默认跳过",
-    "consult_eval: 独立Consult Agent真实模型与Knowledge评测",
-    "employee_data_eval: 独立Employee Data Agent真实模型与Stub评测",
-    "integration: 需要真实外部资源的集成测试，默认按各用例条件跳过",
-    "a2a: 通过官方A2A客户端执行的本地协议测试",
-    "employee_data_a2a: Employee Data官方A2A本地网络测试",
-    "multi_agent_a2a: 三服务本地显式A2A闭环门禁",
-    "a2a_eval: 根入口在a2a/a2a模式下的21条核心业务评测",
-    "protocol: 只用录制/协议层验证公共A2A契约，不承担业务迁移验收",
-    "production_topology: 生产拓扑stub E2E验收（Public A2A→Router→Local/A2A）",
+    # 当前验收态：AgentKit 远端 HTTP 客户端门禁
+    "agentkit: tests/agentkit 下的 AgentKit 远端 HTTP 客户端验收（默认 testpaths）",
+    "wp01_remote_acceptance: WP01 环境前置检查（tests/agentkit/test_wp01_environment.py），远端 AgentKit 服务端 preflight/服务端 Readiness 语义",
+    # 历史本地 markers：仅标记历史套件，不承载当前验收入口
+    "eval: 需要真实方舟模型 Key 的对话评测（历史，已不作为当前验收入口）",
+    "consult_eval: 独立Consult Agent真实模型与Knowledge评测（历史）",
+    "employee_data_eval: 独立Employee Data Agent真实模型与Stub评测（历史）",
+    "integration: 需要真实外部资源的集成测试（历史）",
+    "a2a: 通过官方A2A客户端执行的本地协议测试（历史）",
+    "employee_data_a2a: Employee Data官方A2A本地网络测试（历史）",
+    "multi_agent_a2a: 三服务本地显式A2A闭环门禁（历史）",
+    "a2a_eval: 根入口在a2a/a2a模式下的21条核心业务评测（历史）",
+    "protocol: 只用录制/协议层验证公共A2A契约（历史，不承担业务迁移验收）",
+    "production_topology: 生产拓扑stub E2E验收（历史）",
 ]
-addopts = "-m 'not eval'"

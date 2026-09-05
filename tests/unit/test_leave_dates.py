@@ -67,13 +67,14 @@ def test_over_27_days_continuous_no_shrink():
 
 
 def test_over_27_days_skip_rest_counts_workdays():
-    # 跳休 30 天：按已知工作日计数；排班只有 8-1..8-8 附近，不足 → horizon 或成功。
+    # 跳休 30 天：按已知工作日计数；排班只有 7-28..8-8，随后是 UNKNOWN。
+    # WP-02：需要日期上的 UNKNOWN 不得跳过，故 fail-closed → schedule_unknown。
     r = compute_leave_dates(
         type_name="事假", requested_start_date="2026-07-28",
         requested_end_date="2026-07-28", calendar_duration=30.0,
         workdays_requested=30, table=_table())
-    # 排班有 7-28..8-8 共 11 个工作日，30 个不够 → 报 horizon exceeded。
-    assert r.error_code == "schedule_horizon_exceeded"
+    # 排班有 7-28..8-8 共 11 个工作日，30 个不够，且需要越过未知排班 → 报 schedule_unknown。
+    assert r.error_code == "schedule_unknown"
 
 
 def test_calendar_end_no_27_day_branch():

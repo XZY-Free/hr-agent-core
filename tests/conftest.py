@@ -1,24 +1,66 @@
-"""测试夹具：为结构测试提供占位模型 Key，避免 Agent 实例化时触发 veADK veauth 联网取 token。
+"""测试环境收敛：仅允许 tests/agentkit 下的 AgentKit 远端 HTTP 客户端验收。
 
-- 结构/规则/工具单测不调真实模型，占位 Key 足够。
-- 评测测试（@pytest.mark.eval）需要真实方舟 Key：在 .env 设置 MODEL_AGENT_API_KEY，
-  setdefault 不会覆盖已设值。
-- 生产运行（agent.py）不走 conftest，由 .env 提供真实 Key。
+不自动读取本地配置文件（.env / agentkit.yaml 等），不加载模型环境，不启动本地 Agent。
+测试进程的云端凭据由执行进程环境安全注入，服务端配置另归属 AgentKit（不在本测试内）。
+pytest_sessionstart 在收集 import 任何生产代码之前，对 config.args 做白名单校验：
+只放行 tests/agentkit 及其中已存在的文件/目录/::node；越界或不存在的路径、以及未命中
+tests/agentkit 的默认收集目标，都抛 pytest.UsageError。
+
+同时禁止 --pyargs（把目标当 Python 包名导入，带起本地应用）与 --showlocals（失败时
+打印本地变量/凭据）。纯 --collect-only 在 tests/agentkit 内允许。
+
+校验采用 .resolve() 后的 relative_to 做 containment（非 startswith），避免前缀绕过。
 """
-import os
+
 from pathlib import Path
 
-# veADK 默认 DEBUG 会打印完整工具响应；评测证据另行记录脱敏后的调用轨迹。
-os.environ.setdefault("LOGGING_LEVEL", "INFO")
+import pytest
 
-# pytest 默认不加载 .env，需在此主动加载，否则真实 Key 在 conftest 执行时尚未入环境，
-# 下方 setdefault 会把 dummy 设进去导致评测永远 skip。
-_env_file = Path(__file__).resolve().parent.parent / ".env"
-if _env_file.exists():
-    for _line in _env_file.read_text(encoding="utf-8").splitlines():
-        _line = _line.strip()
-        if _line and not _line.startswith("#") and "=" in _line:
-            _k, _, _v = _line.partition("=")
-            os.environ.setdefault(_k.strip(), _v.strip())
 
-os.environ.setdefault("MODEL_AGENT_API_KEY", "dummy-for-struct-test-only")
+def pytest_sessionstart(session) -> None:
+    config = session.config
+    option = config.option
+
+    if option.pyargs:
+        raise pytest.UsageError(
+            "拒绝 --pyargs：本环境只允许 AgentKit 远端验收 tests/agentkit，"
+            "不接受把目标当 Python 包名导入（带起本地应用 import，且无法按文件系统"
+            " containment 校验）。"
+        )
+    if option.showlocals:
+        raise pytest.UsageError(
+            "拒绝 --showlocals：失败时会打印本地变量/凭据；"
+            "AgentKit 远端验收请使用 --collect-only 等不泄漏本地的选项。"
+        )
+
+    invoke_dir = Path(config.invocation_params.dir)
+    base = Path(__file__).resolve().parent / "agentkit"
+
+    args = list(config.args)
+    if not args:
+        raise pytest.UsageError(
+            "没有可收集路径；本环境只允许 tests/agentkit（AgentKit 远端 HTTP 客户端验收）。"
+        )
+
+    for raw_arg in args:
+        path_part = str(raw_arg).split("::", 1)[0].strip()
+        if not path_part:
+            raise pytest.UsageError(
+                f"收集路径为空：{raw_arg!r}；只允许 tests/agentkit 下已存在的文件/目录/节点。"
+            )
+
+        resolved = (invoke_dir / path_part).resolve()
+        if not resolved.exists():
+            raise pytest.UsageError(
+                f"收集路径不存在：{raw_arg}（解析为 {resolved}）。"
+                "只允许 tests/agentkit 下已存在的文件/目录。"
+            )
+
+        try:
+            resolved.relative_to(base)
+        except ValueError:
+            raise pytest.UsageError(
+                f"只允许 tests/agentkit（AgentKit 远端 HTTP 客户端验收），收集路径越界：{raw_arg}"
+                f"（解析为 {resolved}）。请显式指定 tests/agentkit 下已实现的目标；若默认收集路径"
+                "未命中 tests/agentkit，请先确认 pyproject 的 testpaths 已收敛到 tests/agentkit。"
+            ) from None

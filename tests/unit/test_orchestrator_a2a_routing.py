@@ -81,8 +81,11 @@ class _RecordingClient:
 async def test_document_context_provider_passes_only_the_allowlisted_summary():
     client = _RecordingClient()
     expected = encode_document_context({
-        "url": "https://example.com/notice.docx",
-        "content": "春节值班安排",
+        "documents": [{
+            "canonical_reference": "ref-1",
+            "url": "https://example.com/notice.docx",
+            "content": "春节值班安排",
+        }]
     })
 
     async def context_summary_provider(**kwargs):

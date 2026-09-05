@@ -42,6 +42,10 @@ class HREXecutionContext:
     gaia_provider: GaiaProvider
     request_id: str
     context_id: str
+    # 本轮用户原始文本（仅当显式绑定，用于确认判定与理由/日期来源追溯）。不存 session、
+    # 不由模型生成；未绑定（问候/制度咨询）为 None。默认 None 使 build_hr_execution_context
+    # 现有签名无需扩大。
+    current_user_message: str | None = None
 
 
 # 当前请求维度绑定；无绑定（问候/制度咨询）时值为 None。

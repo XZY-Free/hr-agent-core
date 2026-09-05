@@ -54,9 +54,10 @@ def _ceil_days(days: float) -> int:
 
 
 def next_known_workday(start_date: str, table: ScheduleDayTable) -> str | None:
-    """从 start 起找第一个明确 WORK 的日期（含当日）。找不到返回 None。
+    """从 start 起找第一个明确 WORK 的日期（含当日）。找不到或中途遇 UNKNOWN 返回 None。
 
-    UNKNOWN/REST 不作为起算日；若整个 366 天窗口都无 WORK，返回 None。
+    UNKNOWN/REST 不作为起算日；WP-02：UNKNOWN 在需要的路径上不得被跳过，遇 UNKNOWN
+    即 fail-closed。若整个 366 天窗口都无 WORK 或中途遇 UNKNOWN，返回 None。
     """
     cur = _parse_date(start_date)
     for _ in range(HORIZON_SAFE_LIMIT_DAYS):
@@ -64,8 +65,8 @@ def next_known_workday(start_date: str, table: ScheduleDayTable) -> str | None:
         if status is DayStatus.WORK:
             return _iso(cur)
         if status is DayStatus.UNKNOWN:
-            # UNKNOWN 不能当工作日；但继续向后找已知 WORK。
-            pass
+            # UNKNOWN 不能当工作日，也不能当已知休息日；不得跳过寻找更晚 WORK。
+            return None
         cur = cur + timedelta(days=1)
     return None
 
@@ -79,7 +80,8 @@ def compute_skip_rest_end(
 ) -> DateOutcome:
     """跳休：从 effective_start 沿排班累计 N 个明确 WORK 日。
 
-    - REST/UNKNOWN 不计工作小时但继续向后搜；
+    - 已知 REST 不计工作天数但继续向后搜；
+    - UNKNOWN 在需要路径上不得跳过，遇 UNKNOWN 即 fail-closed（schedule_unknown）；
     - 找到 N 个 WORK 即返回其日期为 end；
     - 超过安全上限仍未找够 → schedule_horizon_exceeded；
     - 排班表没有任何 WORK 证据 → schedule_unknown。
@@ -97,6 +99,10 @@ def compute_skip_rest_end(
     end = effective_start
     for _ in range(max_window_days):
         status = table.day(_iso(cur))
+        if status is DayStatus.UNKNOWN:
+            return DateOutcome(effective_start, end,
+                               error_code="schedule_unknown",
+                               error_message="排班在需要日期上未知，无法确认工作日。")
         if status is DayStatus.WORK:
             count += 1
             end = _iso(cur)
